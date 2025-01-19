@@ -1,5 +1,6 @@
 # SimpDL
 
+
 A Python application built with [ttkbootstrap](https://pypi.org/project/ttkbootstrap) and Selenium to **download images** from [SimpCity](https://simpcity.su). The tool supports:
 
 - **Config editing** for credentials and output directory.
@@ -24,6 +25,7 @@ This README walks you through **requirements**, **installation**, and **usage** 
   - [4. Download Images](#4-download-images)
 - [Running the Program](#running-the-program)
 - [Troubleshooting](#troubleshooting)
+- [Terms and Conditions](#terms-and-conditions)
 
 ---
 
@@ -167,8 +169,8 @@ You should see the **SimpDL** window open:
 
 **Enjoy using SimpDL!** If you have any issues or suggestions, feel free[ to ](https://github.com/annashumate1/SimpDL/issues)[open an issue](https://github.com/annashumate1/SimpDL/issues) or reach out on [Telegram:](https://t.me/annashumatelover)
 
-## Anna
-You can only use this program if you love and respect Anna 
-
-
+## Terms and Conditions
+### By downloading and using this program you agree that Anna is beautiful and deserves every ounce of respect you have
 ![annamainpic](https://github.com/user-attachments/assets/e66ffc59-f920-4a9d-b4cb-d18a11482e3e)
+
+
