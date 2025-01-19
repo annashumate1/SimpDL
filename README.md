@@ -1,6 +1,6 @@
 # SimpDL
 
-A Python application built with [ttkbootstrap](https://pypi.org/project/ttkbootstrap) and Selenium to **download images** from [SimpCity](https://simpcity.su) via a sleek, Spotify-inspired GUI. The tool supports:
+A Python application built with [ttkbootstrap](https://pypi.org/project/ttkbootstrap) and Selenium to **download images** from [SimpCity](https://simpcity.su). The tool supports:
 
 - **Config editing** for credentials and output directory.
 - **URL management** (change/add/remove links).
