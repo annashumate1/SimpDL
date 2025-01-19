@@ -167,3 +167,8 @@ You should see the **SimpDL** window open:
 
 **Enjoy using SimpDL!** If you have any issues or suggestions, feel free[ to ](https://github.com/annashumate1/SimpDL/issues)[open an issue](https://github.com/annashumate1/SimpDL/issues) or reach out on [Telegram:](https://t.me/annashumatelover)
 
+## Anna
+You can only use this program if you love and respect Anna 
+
+
+![annamainpic](https://github.com/user-attachments/assets/e66ffc59-f920-4a9d-b4cb-d18a11482e3e)
