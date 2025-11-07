@@ -172,38 +172,7 @@ SimpDL/
 └── test_cookies.py      # Cookie validation utility
 ```
 
-## Security Considerations
 
-Sensitive data is excluded from version control via `.gitignore`:
-- `config/config.json`
-- `config/manual_cookies.json`
-- `config/urls.txt`
-- `downloads/`
-
-Never commit authentication credentials or personal data to public repositories.
-
-## Legal Notice
-
-This software is provided for educational purposes only. Users are solely responsible for:
-
-- Compliance with the target platform's Terms of Service
-- Adherence to applicable copyright laws
-- Following local and international regulations regarding data access and usage
-
-The authors and contributors assume no liability for misuse of this software.
-
-## Contributing
-
-Contributions are welcome. Please:
-
-1. Fork the repository
-2. Create a feature branch
-3. Implement changes with appropriate documentation
-4. Submit a pull request for review
-
-## License
-
-This project is licensed under the MIT License. See the LICENSE file for details.
 
 ## Support
 
@@ -212,5 +181,6 @@ For issues, bug reports, or feature requests, please use the [GitHub issue track
 For direct contact: [Telegram](https://t.me/annashumatelover)
 
 ---
-
-**Disclaimer**: This tool is intended for personal archival purposes only. Users must respect intellectual property rights and platform policies.
+## Terms and Conditions
+### By downloading and using this program you agree that Anna is beautiful and deserves every ounce of respect you have
+![annamainpic](https://github.com/user-attachments/assets/e66ffc59-f920-4a9d-b4cb-d18a11482e3e)
