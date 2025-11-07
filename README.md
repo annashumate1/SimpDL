@@ -1,176 +1,216 @@
 # SimpDL
 
+A Python-based GUI application for downloading images from SimpCity forums using cookie-based authentication.
 
-A Python application built with [ttkbootstrap](https://pypi.org/project/ttkbootstrap) and Selenium to **download images** from [SimpCity](https://simpcity.su). The tool supports:
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.7+](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
 
-- **Config editing** for credentials and output directory.
-- **URL management** (change/add/remove links).
-- **Automated login** to SimpCity using Selenium.
-- **Downloading** images (in the background, no GUI freeze).
-- **Generating** multiple SimpCity links based on a base URL and page count.
+## Features
 
-This README walks you through **requirements**, **installation**, and **usage** instructions.
-
----
-
-## Table of Contents
-
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [Project Structure](#project-structure)
-- [Usage](#usage)
-  - [1. Configure Application](#1-configure-application)
-  - [2. Manage URLs](#2-manage-urls)
-  - [3. Generate Links](#3-generate-links)
-  - [4. Download Images](#4-download-images)
-- [Running the Program](#running-the-program)
-- [Troubleshooting](#troubleshooting)
-- [Terms and Conditions](#terms-and-conditions)
-
----
+- **Hybrid Download System**: Combines browser automation (Playwright) for initial page access with fast HTTP requests for bulk downloads
+- **Cookie-Based Authentication**: Bypasses captcha issues and login detection
+- **GUI Interface**: Built with ttkbootstrap for modern appearance and ease of use
+- **Multi-Page Support**: Automatically processes paginated forum threads
+- **Progress Tracking**: Real-time download status and progress indicators
+- **Automatic Organization**: Downloads are organized by thread name in designated folders
 
 ## Requirements
 
-The project depends on the following Python packages:
-
-```txt
-requests
-selenium
-Pillow
-ttkbootstrap
-```
-
-These can be installed via:
-
-```bash
-pip install -r requirements.txt
-```
-
-> **Note**: You must also have **Chrome** (and the appropriate [ChromeDriver](https://chromedriver.chromium.org/downloads)) installed. On most systems, Selenium can detect your existing Chrome and match driver versions automatically.
-
-
+- Python 3.7 or higher
+- Chromium-based browser (for Playwright)
+- Active account on the target platform
 
 ## Installation
 
-1. **Clone** this repository:
-
+1. **Clone the repository**
    ```bash
-   git clone https://github.com/annashumate1/SimpDL
+   git clone https://github.com/annashumate1/SimpDL.git
    cd SimpDL
    ```
 
-2. **Install dependencies**:
-
+2. **Install Python dependencies**
    ```bash
    pip install -r requirements.txt
    ```
 
-3. **(Optional) Virtual Environment**:\
-   If you prefer, create and activate a [virtual environment](https://docs.python.org/3/tutorial/venv.html), then install dependencies.
+3. **Install Playwright browsers**
+   ```bash
+   playwright install chromium
+   ```
 
-4. **Check config folder**:
+4. **Configure the application**
+   ```bash
+   cp config/config.example.json config/config.json
+   cp config/manual_cookies.example.json config/manual_cookies.json
+   cp config/urls.example.txt config/urls.txt
+   ```
 
-   - Ensure you have a `config/` folder with:
-     - `config.json` (for login credentials, output directory, etc.)
-     - `urls.txt` (list of SimpCity links)
+## Configuration
 
----
+### Cookie Extraction
 
-## Project Structure
+Authentication uses browser cookies rather than username/password credentials.
 
-```bash
-SimpDL/
-├─ assets/
-│  └─ anna.jpg         # icon (change if you want but keep if you love Anna :) )
-├─ config/
-│  ├─ config.json      # stores username/password/output_directory
-│  └─ urls.txt         # stores links
-├─ main.py             # main GUI entry point
-├─ config_utils.py     # frames for editing config & URL list
-├─ downloader.py       # download frame & logic (multithreaded)
-├─ image_utils.py      # helper functions for validating images
-├─ link_utils.py       # link generation & frames
-├─ login_utils.py      # simpcity login function
-├─ requirements.txt    # required packages
-└─ README.md           # this file
+1. Run the cookie extraction utility:
+   ```bash
+   python extract_cookie_header.py
+   ```
+
+2. Follow the prompts:
+   - Navigate to `https://simpcity.cr` in your browser
+   - Log in to your account
+   - Open Developer Tools (F12)
+   - Switch to the Network tab
+   - Refresh the page
+   - Select the first request
+   - Locate the `Cookie:` header in Request Headers
+   - Copy the entire cookie string
+   - Paste into the terminal when prompted
+
+### Download Directory
+
+Set your preferred download location in `config/config.json`:
+
+```json
+{
+    "output_directory": "/path/to/downloads"
+}
 ```
 
----
+Alternatively, use the GUI to browse and select a folder.
+
+### URL Management
+
+Add target URLs to `config/urls.txt`, one per line:
+
+```
+https://simpcity.cr/threads/example.12345/page-1
+https://simpcity.cr/threads/example.12345/page-2
+```
+
+Or use the built-in link generator to create paginated URLs automatically.
 
 ## Usage
 
-Once installed, you can run the application and **use the GUI** to edit config, manage URLs, generate links, and download images.
-
-### 1. Configure Application
-
-- Click **“Modify Config”** in the sidebar.
-- You’ll see all keys from `config.json`, such as `username`, `password`, `output_directory`.
-- Edit them as needed, then **Save**.
-- **username** / **password** should match your SimpCity account.
-- **output\_directory** is where downloaded images will go
-> **Note**: The images will go in a folder in the output directory automatically created by the program.
-
-### 2. Manage URLs
-
-- Click **“Change URL File”** in the sidebar.
-- A list of URLs from `urls.txt` is displayed.
-- **Add New URL** at the bottom by typing into the entry and pressing **Enter** or clicking **Add**.
-- **Delete Link** next to any entry to remove it from the file.
-
-### 3. Generate Links
-
-- Click **“Generate Links”** in the sidebar.
-- Enter the **Base Link** (e.g., `https://simpcity.su/threads/nottrebeca_.180370/`) and **Number of Pages** (e.g., 5).
-- The tool writes all pages (`page-1`, `page-2`, etc.) into `urls.txt` automatically.
-- **Note**: You can edit these again in **Change URL File** if needed.
-
-### 4. Download Images
-
-- Click **“Download Images”** in the sidebar.
-- **Start Download** triggers a multithreaded process:
-  1. **Logs in** to SimpCity using credentials in `config.json`.
-  2. Iterates over each URL in `urls.txt`.
-  3. Scrapes and downloads valid images to your `output_directory`.
-- During download, you’ll see a **progress bar** and **status**.
-- **Log messages** appear in the text box.
-- You can switch to other pages in the sidebar while it downloads (the GUI won’t freeze).
-> **Note**: Don't be alarmed if the program skips over files marked as "invalid" these files are not the images you are looking for (e.g profile photos, banners etc.) 
-
----
-
-## Running the Program
+Launch the application:
 
 ```bash
-cd SimpDL
 python main.py
 ```
 
-You should see the **SimpDL** window open:
+### GUI Navigation
 
-1. **Sidebar** on the left with navigation buttons.
-2. **Home** page (default) with a welcome message.
-3. Other pages as described above.
+- **Download Settings**: Configure output directory
+- **Manage Download URLs**: Add or remove target URLs
+- **Generate Links**: Auto-create paginated thread URLs
+- **Download Images**: Execute the download process
 
----
+### Download Process
+
+1. Click "Download Images" in the sidebar
+2. Click "Start Hybrid Download"
+3. Monitor progress in real-time
+4. Downloaded files are saved to configured directory, organized by thread
+
+## Technical Details
+
+### Hybrid Approach
+
+The application uses a two-tier download strategy:
+
+1. **First Page**: Playwright-based browser automation handles additional authentication challenges
+2. **Subsequent Pages**: Direct HTTP requests with authenticated cookies for faster processing
+
+This approach optimizes for both reliability and performance.
+
+### Cookie Management
+
+Cookies typically remain valid for 1-4 weeks. When authentication fails, re-run the cookie extraction process.
 
 ## Troubleshooting
 
-- **Credentials**: If login fails, confirm your `username` and `password` in `config/config.json` are correct.
-- **ChromeDriver**: If Selenium fails to launch Chrome, check that your **Chrome** version matches your **ChromeDriver** version.
-- **Images Not Downloading**:
-  - Ensure you have valid links in `urls.txt`.
-- **Tkinter Issues**:
-  - **Windows**: Tkinter is included by default with Python. If you encounter issues, ensure you installed Python with the **Add Python to PATH** option.
-  - **Linux**: Install via `sudo pacman -S tk` (Arch) or `sudo apt-get install python3-tk` (Ubuntu).
-  - **macOS**: Ensure you have XQuartz or the correct Tcl/Tk environment.
+### HTTP 403 Errors
+
+**Symptom**: Access denied errors during download
+
+**Solution**: Extract fresh cookies using `extract_cookie_header.py`
+
+### Missing Configuration
+
+**Symptom**: Application reports missing cookies or configuration
+
+**Solution**: Verify `config/manual_cookies.json` and `config/config.json` exist and are properly formatted
+
+### Slow Performance
+
+**Possible Causes**:
+- Network congestion
+- Server-side rate limiting
+- High traffic on target server
+
+**Solutions**:
+- Verify network connection
+- Retry during off-peak hours
+- Check for rate limiting messages in logs
+
+### First Page Failures
+
+Page 1 may occasionally fail due to additional anti-automation measures. This is expected behavior. The hybrid system attempts multiple strategies to handle this.
+
+## Project Structure
+
+```
+SimpDL/
+├── assets/              # Application resources
+├── config/              # Configuration files (git-ignored)
+├── main.py              # Application entry point
+├── config_utils.py      # Configuration management
+├── downloader_hybrid.py # Core download logic
+├── image_utils.py       # Image validation utilities
+├── link_utils.py        # URL generation
+├── extract_cookie_header.py  # Cookie extraction tool
+└── test_cookies.py      # Cookie validation utility
+```
+
+## Security Considerations
+
+Sensitive data is excluded from version control via `.gitignore`:
+- `config/config.json`
+- `config/manual_cookies.json`
+- `config/urls.txt`
+- `downloads/`
+
+Never commit authentication credentials or personal data to public repositories.
+
+## Legal Notice
+
+This software is provided for educational purposes only. Users are solely responsible for:
+
+- Compliance with the target platform's Terms of Service
+- Adherence to applicable copyright laws
+- Following local and international regulations regarding data access and usage
+
+The authors and contributors assume no liability for misuse of this software.
+
+## Contributing
+
+Contributions are welcome. Please:
+
+1. Fork the repository
+2. Create a feature branch
+3. Implement changes with appropriate documentation
+4. Submit a pull request for review
+
+## License
+
+This project is licensed under the MIT License. See the LICENSE file for details.
+
+## Support
+
+For issues, bug reports, or feature requests, please use the [GitHub issue tracker](https://github.com/annashumate1/SimpDL/issues).
+
+For direct contact: [Telegram](https://t.me/annashumatelover)
 
 ---
 
-
-**Enjoy using SimpDL!** If you have any issues or suggestions, feel free[ to ](https://github.com/annashumate1/SimpDL/issues)[open an issue](https://github.com/annashumate1/SimpDL/issues) or reach out on [Telegram:](https://t.me/annashumatelover)
-
-## Terms and Conditions
-### By downloading and using this program you agree that Anna is beautiful and deserves every ounce of respect you have
-![annamainpic](https://github.com/user-attachments/assets/e66ffc59-f920-4a9d-b4cb-d18a11482e3e)
-
-
+**Disclaimer**: This tool is intended for personal archival purposes only. Users must respect intellectual property rights and platform policies.

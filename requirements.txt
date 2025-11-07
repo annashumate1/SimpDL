@@ -1,4 +1,5 @@
 requests
-selenium
+beautifulsoup4
 Pillow
 ttkbootstrap
+playwright

@@ -1,5 +1,3 @@
 {
-    "username": "username",
-    "password": "password",
-    "output_directory": "/path/to/output"
+    "output_directory": "/home/sean/Desktop/simp/SimpDL/downloads"
 }
