@@ -5,182 +5,266 @@ A Python-based GUI application for downloading images from SimpCity forums using
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.7+](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
 
+---
+
 ## Features
 
-- **Hybrid Download System**: Combines browser automation (Playwright) for initial page access with fast HTTP requests for bulk downloads
-- **Cookie-Based Authentication**: Bypasses captcha issues and login detection
-- **GUI Interface**: Built with ttkbootstrap for modern appearance and ease of use
-- **Multi-Page Support**: Automatically processes paginated forum threads
-- **Progress Tracking**: Real-time download status and progress indicators
-- **Automatic Organization**: Downloads are organized by thread name in designated folders
+* Hybrid download engine using browser automation and fast HTTP requests
+* Modern GUI built with Tkinter and ttkbootstrap
+* Cookie-based authentication (no passwords stored)
+* Automatic setup of folders and config files
+* Multi-page thread support
+* Organised downloads by thread
+* Real-time progress and logging
+
+---
 
 ## Requirements
 
-- Python 3.7 or higher
-- Chromium-based browser (for Playwright)
-- Active account on the target platform
+* Python 3.9 or higher recommended
+* Internet connection
+* A SimpCity account
+* Chromium-based browser (for Playwright)
+
+### Linux system packages
+
+Arch / Endeavour / CachyOS:
+
+```bash
+sudo pacman -S python tk tcl xorg-xwayland
+```
+
+Ubuntu / Debian:
+
+```bash
+sudo apt install python3 python3-tk
+```
+
+---
 
 ## Installation
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/annashumate1/SimpDL.git
-   cd SimpDL
-   ```
+### 1. Clone the repository
 
-2. **Install Python dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. **Install Playwright browsers**
-   ```bash
-   playwright install chromium
-   ```
-
-4. **Configure the application**
-   ```bash
-   cp config/config.example.json config/config.json
-   cp config/manual_cookies.example.json config/manual_cookies.json
-   cp config/urls.example.txt config/urls.txt
-   ```
-
-## Configuration
-
-### Cookie Extraction
-
-Authentication uses browser cookies rather than username/password credentials.
-
-1. Run the cookie extraction utility:
-   ```bash
-   python extract_cookie_header.py
-   ```
-
-2. Follow the prompts:
-   - Navigate to `https://simpcity.cr` in your browser
-   - Log in to your account
-   - Open Developer Tools (F12)
-   - Switch to the Network tab
-   - Refresh the page
-   - Select the first request
-   - Locate the `Cookie:` header in Request Headers
-   - Copy the entire cookie string
-   - Paste into the terminal when prompted
-
-### Download Directory
-
-Set your preferred download location in `config/config.json`:
-
-```json
-{
-    "output_directory": "/path/to/downloads"
-}
+```bash
+git clone https://github.com/annashumate1/SimpDL.git
+cd SimpDL
 ```
 
-Alternatively, use the GUI to browse and select a folder.
+---
 
-### URL Management
+### 2. Create a virtual environment (recommended)
 
-Add target URLs to `config/urls.txt`, one per line:
-
-```
-https://simpcity.cr/threads/example.12345/page-1
-https://simpcity.cr/threads/example.12345/page-2
+```bash
+python -m venv .venv
 ```
 
-Or use the built-in link generator to create paginated URLs automatically.
+Activate it:
 
-## Usage
+bash / zsh:
 
-Launch the application:
+```bash
+source .venv/bin/activate
+```
+
+fish:
+
+```fish
+source .venv/bin/activate.fish
+```
+
+---
+
+### 3. Install dependencies
+
+```bash
+pip install -r requirements.txt
+playwright install chromium
+```
+
+---
+
+### 4. First launch
 
 ```bash
 python main.py
 ```
 
-### GUI Navigation
+On first run, SimpDL automatically creates:
 
-- **Download Settings**: Configure output directory
-- **Manage Download URLs**: Add or remove target URLs
-- **Generate Links**: Auto-create paginated thread URLs
-- **Download Images**: Execute the download process
+```
+config/
+config/config.json
+config/manual_cookies.json
+urls.txt
+~/Downloads/SimpDL/
+```
 
-### Download Process
+The GUI opens even if cookies are missing.
 
-1. Click "Download Images" in the sidebar
-2. Click "Start Hybrid Download"
-3. Monitor progress in real-time
-4. Downloaded files are saved to configured directory, organized by thread
+---
 
-## Technical Details
+## Cookie setup (required)
 
-### Hybrid Approach
+SimpDL does not store your username or password. Authentication uses browser cookies.
 
-The application uses a two-tier download strategy:
+Run:
 
-1. **First Page**: Playwright-based browser automation handles additional authentication challenges
-2. **Subsequent Pages**: Direct HTTP requests with authenticated cookies for faster processing
+```bash
+python extract_cookie_header.py
+```
 
-This approach optimizes for both reliability and performance.
+Then:
 
-### Cookie Management
+1. Go to [https://simpcity.cr](https://simpcity.cr)
+2. Log in
+3. Press F12 and open the Network tab
+4. Refresh the page
+5. Click the first request
+6. Copy the entire Cookie header
+7. Paste it into the script
+<img width="791" height="924" alt="simcityredactedcookies" src="https://github.com/user-attachments/assets/7daccaed-2bff-4041-8060-8774fd0c70e3" />
 
-Cookies typically remain valid for 1-4 weeks. When authentication fails, re-run the cookie extraction process.
+
+This fills:
+
+```
+config/manual_cookies.json
+```
+
+---
+
+## Configuration
+
+### Download folder
+
+Default:
+
+```
+~/Downloads/SimpDL
+```
+
+Change it in:
+
+```
+config/config.json
+```
+
+Example:
+
+```json
+{
+  "output_directory": "/path/to/output"
+}
+```
+
+You can also change it inside the GUI.
+
+---
+
+### URLs
+
+Add links manually in:
+
+```
+urls.txt
+```
+
+Example:
+
+```
+https://simpcity.cr/threads/example.12345/
+```
+
+Or use the built-in Generate Links tab.
+
+---
+
+## Usage
+
+Launch:
+
+```bash
+python main.py
+```
+
+Inside the app:
+
+* Config: set output folder
+* URLs: manage download targets
+* Generate Links: auto-create pages
+* Download: start the hybrid engine
+
+Click "Start Hybrid Download" to begin.
+
+---
+
+## How the hybrid engine works
+
+1. First page is loaded through Playwright to validate access
+2. Remaining pages are downloaded using fast authenticated HTTP requests
+
+This balances reliability and speed.
+
+---
 
 ## Troubleshooting
 
-### HTTP 403 Errors
+### App opens but downloads fail
 
-**Symptom**: Access denied errors during download
+Cookies are missing or expired.
+Re-run:
 
-**Solution**: Extract fresh cookies using `extract_cookie_header.py`
-
-### Missing Configuration
-
-**Symptom**: Application reports missing cookies or configuration
-
-**Solution**: Verify `config/manual_cookies.json` and `config/config.json` exist and are properly formatted
-
-### Slow Performance
-
-**Possible Causes**:
-- Network congestion
-- Server-side rate limiting
-- High traffic on target server
-
-**Solutions**:
-- Verify network connection
-- Retry during off-peak hours
-- Check for rate limiting messages in logs
-
-### First Page Failures
-
-Page 1 may occasionally fail due to additional anti-automation measures. This is expected behavior. The hybrid system attempts multiple strategies to handle this.
-
-## Project Structure
-
+```bash
+python extract_cookie_header.py
 ```
-SimpDL/
-├── assets/              # Application resources
-├── config/              # Configuration files (git-ignored)
-├── main.py              # Application entry point
-├── config_utils.py      # Configuration management
-├── downloader_hybrid.py # Core download logic
-├── image_utils.py       # Image validation utilities
-├── link_utils.py        # URL generation
-├── extract_cookie_header.py  # Cookie extraction tool
-└── test_cookies.py      # Cookie validation utility
-```
-
-
-
-## Support
-
-For issues, bug reports, or feature requests, please use the [GitHub issue tracker](https://github.com/annashumate1/SimpDL/issues).
-
-For direct contact: [Telegram](https://t.me/annashumatelover)
 
 ---
+
+### Permission denied: /path
+
+Output folder not set.
+Open the Config tab or edit:
+
+```
+config/config.json
+```
+
+---
+
+### Tkinter error on Linux
+
+Install:
+
+```bash
+sudo pacman -S tk
+# or
+sudo apt install python3-tk
+```
+
+---
+
+### Nothing happens when launching
+
+Make sure you are using the virtual environment:
+
+```bash
+which python
+```
+
+It should point to `.venv/bin/python`.
+
+---
+
+## Disclaimer
+
+This project is for educational and personal-use purposes only.
+Users are responsible for complying with the target website’s terms of service and local laws.
+
+---
+
 ## Terms and Conditions
-### By downloading and using this program you agree that Anna is beautiful and deserves every ounce of respect you have
+
+By downloading and using this program you agree that Anna is beautiful and deserves every ounce of respect you have.
+
 ![annamainpic](https://github.com/user-attachments/assets/e66ffc59-f920-4a9d-b4cb-d18a11482e3e)
