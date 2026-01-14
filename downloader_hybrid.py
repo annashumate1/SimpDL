@@ -11,6 +11,23 @@ from playwright.sync_api import sync_playwright
 
 from image_utils import is_valid_image
 
+def _default_output_dir() -> str:
+    return os.path.join(os.path.expanduser('~'), 'Downloads', 'SimpDL')
+
+def _sanitize_output_dir(path: str) -> str:
+    path = (path or '').strip()
+    if not path or path == '/path':
+        return _default_output_dir()
+    return os.path.expanduser(path)
+
+def _has_auth_cookies(cookie_data: dict) -> bool:
+    if not isinstance(cookie_data, dict):
+        return False
+    ch = (cookie_data.get('cookie_header') or '').strip()
+    pc = cookie_data.get('parsed_cookies') or {}
+    return bool(ch) or (isinstance(pc, dict) and len(pc) > 0)
+
+
 def build_download_frame(parent, config_path, urls_file):
     """Premium download interface."""
     frame = tb.Frame(parent, bootstyle="secondary")
@@ -180,16 +197,18 @@ def build_download_frame(parent, config_path, urls_file):
 
     def run_download():
         try:
-            with open(config_path, "r") as f:
-                config = json.load(f)
-            output_directory = config.get("output_directory", "")
-            
-            if not output_directory:
-                log_message("ERROR: No output directory set!")
-                log_message("Please go to 'Download Settings' and set a download folder.")
-                return
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f) or {}
 
-            with open(urls_file, "r") as file:
+            output_directory = _sanitize_output_dir(config.get("output_directory", ""))
+            # Make sure it's creatable; if not, fall back to ~/Downloads/SimpDL
+            try:
+                os.makedirs(output_directory, exist_ok=True)
+            except Exception:
+                output_directory = _default_output_dir()
+                os.makedirs(output_directory, exist_ok=True)
+
+            with open(urls_file, "r", encoding="utf-8") as file:
                 urls = [line.strip() for line in file if line.strip()]
 
             if not urls:
@@ -198,14 +217,21 @@ def build_download_frame(parent, config_path, urls_file):
 
             script_dir = os.path.dirname(os.path.realpath(__file__))
             cookie_file = os.path.join(script_dir, "config", "manual_cookies.json")
-            
+
             if not os.path.exists(cookie_file):
-                log_message("ERROR: manual_cookies.json not found!")
+                log_message("ERROR: Cookies not configured yet.")
+                log_message("Open config/manual_cookies.json and paste your Cookie header, or run extract_cookie_header.py")
                 return
-            
-            with open(cookie_file, "r") as f:
-                cookie_data = json.load(f)
-            
+
+            with open(cookie_file, "r", encoding="utf-8") as f:
+                cookie_data = json.load(f) or {}
+
+            if not _has_auth_cookies(cookie_data):
+                log_message("ERROR: Cookies file exists but is empty.")
+                log_message("Open config/manual_cookies.json and paste your Cookie header, or run extract_cookie_header.py")
+                return
+
+            # Cookie header (requests) or parsed cookies (playwright) will be used below
             if "cookie_header" in cookie_data:
                 cookie_header = cookie_data.get("cookie_header", "")
             else:
