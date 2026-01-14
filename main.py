@@ -1,6 +1,8 @@
 import os
+import json
 import webbrowser
 import tkinter as tk
+from tkinter import messagebox
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
 
@@ -8,18 +10,79 @@ from config_utils import build_config_frame, build_urls_frame
 from downloader_hybrid import build_download_frame
 from link_utils import build_generate_links_frame
 
+
+def ensure_first_run_defaults(script_dir: str) -> dict:
+    """Create sane defaults so the app can launch on a fresh clone.
+    Returns the loaded (or created) config dict.
+    """
+    config_dir = os.path.join(script_dir, "config")
+    os.makedirs(config_dir, exist_ok=True)
+
+    config_path = os.path.join(config_dir, "config.json")
+    urls_file = os.path.join(config_dir, "urls.txt")
+    cookie_file = os.path.join(config_dir, "manual_cookies.json")
+
+    default_output = os.path.join(os.path.expanduser("~"), "Downloads", "SimpDL")
+
+    # --- config.json ---
+    config = {}
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f) or {}
+        except Exception:
+            # If it's corrupted, don't crash startup; keep the bad file around.
+            bad_path = config_path + ".bad"
+            try:
+                os.replace(config_path, bad_path)
+            except Exception:
+                pass
+            config = {}
+
+    changed = False
+    out = (config.get("output_directory") or "").strip()
+    if not out or out == "/path":
+        config["output_directory"] = default_output
+        changed = True
+
+    if changed or not os.path.exists(config_path):
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2)
+
+    # --- urls.txt ---
+    if not os.path.exists(urls_file):
+        with open(urls_file, "w", encoding="utf-8") as f:
+            f.write("")
+
+    # --- manual_cookies.json (template) ---
+    if not os.path.exists(cookie_file):
+        template = {
+            "cookie_header": "",
+            "parsed_cookies": {},
+            "notes": "Paste your Cookie header here. You can generate it by running extract_cookie_header.py"
+        }
+        with open(cookie_file, "w", encoding="utf-8") as f:
+            json.dump(template, f, indent=2)
+
+    # Ensure default output directory exists (safe: inside home)
+    try:
+        os.makedirs(config.get("output_directory", default_output), exist_ok=True)
+    except Exception:
+        config["output_directory"] = default_output
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2)
+        os.makedirs(default_output, exist_ok=True)
+
+    return config
+
 def main_gui():
     script_dir = os.path.dirname(os.path.realpath(__file__))
+
+    # First-run: create config files / folders so the GUI can open cleanly
+    ensure_first_run_defaults(script_dir)
+
     config_path = os.path.join(script_dir, "config", "config.json")
     urls_file = os.path.join(script_dir, "config", "urls.txt")
-    cookie_file = os.path.join(script_dir, "config", "manual_cookies.json")
-
-    # Check if cookies exist, if not show setup wizard
-    if not os.path.exists(cookie_file):
-        show_cookie_setup_wizard(script_dir)
-        # After wizard completes, check again
-        if not os.path.exists(cookie_file):
-            return  # User cancelled setup
 
     app = tb.Window(themename="darkly")
     app.title("SimpDL")
