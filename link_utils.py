@@ -45,7 +45,7 @@ def build_generate_links_frame(parent, urls_file, refresh_urls_func=None):
     input_card.pack(fill="both", expand=True)
 
     # Base URL input
-    url_frame = tb.LabelFrame(
+    url_frame = tb.Labelframe(
         input_card,
         text="🔗 Thread URL",
         bootstyle="primary",
@@ -66,7 +66,7 @@ def build_generate_links_frame(parent, urls_file, refresh_urls_func=None):
     base_link_entry.insert(0, "https://simpcity.cr/threads/example.12345")
 
     # Page count input
-    pages_frame = tb.LabelFrame(
+    pages_frame = tb.Labelframe(
         input_card,
         text="📄 Number of Pages",
         bootstyle="info",
@@ -145,7 +145,7 @@ def build_generate_links_frame(parent, urls_file, refresh_urls_func=None):
     generate_btn.pack(pady=(0, 20), ipadx=20, ipady=10)
 
     # Example section
-    example_frame = tb.LabelFrame(
+    example_frame = tb.Labelframe(
         input_card,
         text="💡 Example",
         bootstyle="light",
