@@ -7,8 +7,116 @@ import threading
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
 from bs4 import BeautifulSoup
+from urllib.parse import urljoin
+from io import BytesIO
+from PIL import Image
 
-from image_utils import is_valid_image
+def _normalize_url(page_url, raw_url):
+    if not raw_url:
+        return None
+    raw_url = raw_url.strip()
+    if not raw_url or raw_url.startswith(("data:", "javascript:", "#")):
+        return None
+    if raw_url.startswith("//"):
+        return "https:" + raw_url
+    return urljoin(page_url, raw_url)
+
+
+def _parse_srcset(srcset_value):
+    urls = []
+    for part in srcset_value.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        urls.append(part.split()[0])
+    return urls
+
+
+def _looks_like_thumbnail(image_url):
+    lower = image_url.lower()
+    thumb_hints = (
+        "thumbnail",
+        "/thumb/",
+        "/thumbs/",
+        "thumb_",
+        "_thumb",
+        "-thumb",
+        "/small/",
+        "/preview/",
+        "preview="
+    )
+    return any(hint in lower for hint in thumb_hints)
+
+
+def _extract_image_candidates(img_tag, page_url):
+    raw_candidates = []
+    parent_link = img_tag.find_parent("a")
+    if parent_link:
+        raw_candidates.extend([
+            parent_link.get("href"),
+            parent_link.get("data-url"),
+            parent_link.get("data-src")
+        ])
+
+    raw_candidates.extend([
+        img_tag.get("data-full-src"),
+        img_tag.get("data-full"),
+        img_tag.get("data-original"),
+        img_tag.get("data-url"),
+        img_tag.get("data-src")
+    ])
+
+    data_srcset = img_tag.get("data-srcset")
+    if data_srcset:
+        raw_candidates.extend(reversed(_parse_srcset(data_srcset)))
+
+    srcset = img_tag.get("srcset")
+    if srcset:
+        raw_candidates.extend(reversed(_parse_srcset(srcset)))
+
+    raw_candidates.append(img_tag.get("src"))
+
+    normalized = []
+    seen = set()
+    for raw_url in raw_candidates:
+        normalized_url = _normalize_url(page_url, raw_url)
+        if normalized_url and normalized_url not in seen:
+            seen.add(normalized_url)
+            normalized.append(normalized_url)
+
+    preferred = [url for url in normalized if not _looks_like_thumbnail(url)]
+    fallback = [url for url in normalized if url not in preferred]
+    return preferred + fallback
+
+
+def _collect_image_candidates(soup, page_url):
+    candidates = []
+    seen_first = set()
+
+    for img_tag in soup.find_all("img"):
+        candidate_set = _extract_image_candidates(img_tag, page_url)
+        if not candidate_set:
+            continue
+
+        first_choice = candidate_set[0]
+        if first_choice in seen_first:
+            continue
+
+        seen_first.add(first_choice)
+        candidates.append(candidate_set)
+
+    return candidates
+
+
+def _is_valid_image_response(response):
+    if response.status_code != 200:
+        return False
+    try:
+        image = Image.open(BytesIO(response.content))
+        width, height = image.size
+        return width >= 256 and height >= 256
+    except Exception:
+        return False
 
 def build_download_frame(parent, config_path, urls_file):
     """
@@ -263,26 +371,16 @@ NOTE: Cookies expire! If download fails, extract fresh cookies.
                     # Parse HTML
                     soup = BeautifulSoup(response.content, 'html.parser')
                     images = soup.find_all('img')
+                    image_candidates = _collect_image_candidates(soup, url)
                     
-                    log_message(f"Found {len(images)} image tags. Filtering valid images...")
-                    
-                    valid_images = []
-                    for img in images:
-                        img_url = img.get('src') or img.get('data-src')
-                        if img_url:
-                            # Convert relative URLs to absolute
-                            if img_url.startswith('//'):
-                                img_url = 'https:' + img_url
-                            elif img_url.startswith('/'):
-                                img_url = 'https://simpcity.cr' + img_url
-                            valid_images.append(img_url)
-                    
-                    log_message(f"Processing {len(valid_images)} image URLs...")
+                    log_message(f"Found {len(images)} image tags.")
+                    log_message(f"Resolved {len(image_candidates)} candidate image URLs (source-first).")
                     
                     page_downloaded = 0
-                    for idx, img_url in enumerate(valid_images):
+                    for idx, candidates in enumerate(image_candidates):
+                        downloaded = False
                         try:
-                            if is_valid_image(img_url):
+                            for img_url in candidates:
                                 # Download with proper headers
                                 img_headers = session.headers.copy()
                                 img_headers['Referer'] = url
@@ -290,7 +388,7 @@ NOTE: Cookies expire! If download fails, extract fresh cookies.
                                 
                                 img_response = session.get(img_url, timeout=15, headers=img_headers)
                                 
-                                if img_response.status_code == 200:
+                                if _is_valid_image_response(img_response):
                                     filename = f"image_{len(os.listdir(combined_output_dir)) + 1}.jpg"
                                     filepath = os.path.join(combined_output_dir, filename)
                                     
@@ -299,17 +397,23 @@ NOTE: Cookies expire! If download fails, extract fresh cookies.
                                     
                                     page_downloaded += 1
                                     total_downloaded += 1
+                                    downloaded = True
                                     log_message(f"  ✓ Downloaded: {filename} ({page_downloaded} on this page)")
                                     
                                 else:
                                     log_message(f"  ✗ Failed: HTTP {img_response.status_code}")
+                                if downloaded:
+                                    break
                         except Exception as e:
                             log_message(f"  ✗ Error downloading: {str(e)[:50]}")
                         
+                        if not downloaded:
+                            log_message("  Skipped: no valid source image URL")
+
                         # Update progress
-                        progress = ((idx + 1) / len(valid_images)) * 100
+                        progress = ((idx + 1) / len(image_candidates)) * 100 if image_candidates else 100
                         frame.after(0, lambda val=progress: progress_bar.configure(value=val))
-                        status_text = page_status(idx + 1, len(valid_images), current_page, total_pages)
+                        status_text = page_status(idx + 1, len(image_candidates), current_page, total_pages)
                         frame.after(0, lambda st=status_text: progress_label.config(text=st))
                         
                         # Small delay between images
