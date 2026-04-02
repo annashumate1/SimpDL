@@ -9,7 +9,9 @@ A Python-based GUI application for downloading images from SimpCity forums using
 
 ## Features
 
-* Hybrid download engine using browser automation and fast HTTP requests
+* **Source Quality downloads by default** (original images from external image hosts, not forum previews)
+* Headless browser resolution engine with anti-scraping stealth (Playwright)
+* Original behaviour preserved as `--lowres` mode (faster downloads using direct forum previews)
 * Modern GUI built with Tkinter and ttkbootstrap
 * Cookie-based authentication (no passwords stored)
 * Automatic setup of folders and config files
@@ -182,7 +184,7 @@ Or use the built-in Generate Links tab.
 
 ## Usage
 
-Launch:
+### GUI
 
 ```bash
 python main.py
@@ -190,21 +192,53 @@ python main.py
 
 Inside the app:
 
-* Config: set output folder
-* URLs: manage download targets
-* Generate Links: auto-create pages
-* Download: start the hybrid engine
+* **Config**: set output folder
+* **URLs**: manage download targets
+* **Generate Links**: auto-create page URLs for multi-page threads
+* **Download**: start the engine
 
-Click "Start Hybrid Download" to begin.
+In the Download tab, click **▶️ Start Download** to begin in Source Quality mode (default).
+
+To use Low-Resolution mode (direct previews, faster), enable the **Low-Resolution Mode** toggle before starting.
 
 ---
 
-## How the hybrid engine works
+### CLI
 
-1. First page is loaded through Playwright to validate access
-2. Remaining pages are downloaded using fast authenticated HTTP requests
+```bash
+# Source quality (default) — resolves original images from external hosts
+python cli_download.py
 
-This balances reliability and speed.
+# Low-resolution mode — directly downloads forum preview images
+python cli_download.py --lowres
+```
+
+URLs are read from `config/urls.txt`. Output is saved under `config/config.json → output_directory`.
+
+**Folder naming:**
+
+| Mode | Output folder |
+|---|---|
+| Source Quality (default) | `<thread-name>/` |
+| Low-Res (`--lowres`) | `<thread-name>_lowres/` |
+
+---
+
+## How the download engine works
+
+### Source Quality Mode (Default)
+
+1. Each thread page is loaded via Playwright with your session cookies
+2. Images wrapped in `<a>` links are identified — these point to external image hosts (e.g. `jpg6.su`, `imgbox`)
+3. A headless browser visits each external host with stealth headers to resolve the original full-resolution image URL
+4. A verification step strips medium-quality suffixes (e.g. `.md.jpg → .jpg`) where applicable
+5. The resolved source image is downloaded via an authenticated `requests` session
+
+### Low-Resolution Mode (`--lowres` / GUI toggle)
+
+1. Thread pages are loaded the same way
+2. The `src` / `data-src` attribute on each `<img>` tag is used directly — no external host traversal
+3. Images are downloaded immediately — significantly faster but lower quality (forum-proxied previews)
 
 ---
 

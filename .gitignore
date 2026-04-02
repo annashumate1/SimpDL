@@ -37,3 +37,7 @@ Thumbs.db
 
 # Logs
 *.log
+# Virtual environment (Playwright/Local)
+.venv/
+
+Downloads/
