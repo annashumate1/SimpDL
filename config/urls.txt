@@ -1,5 +1,0 @@
-https://simpcity.cr/threads/example.12345/page-1
-https://simpcity.cr/threads/example.12345/page-2
-https://simpcity.cr/threads/example.12345/page-3
-https://simpcity.cr/threads/example.12345/page-4
-https://simpcity.cr/threads/example.12345/page-5
