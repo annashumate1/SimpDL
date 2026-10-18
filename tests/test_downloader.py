@@ -67,6 +67,14 @@ class ParserTests(unittest.TestCase):
             "https://simpcity.cr/attachments/photo-jpg.456/", "https://cdn.example/full.png",
         ])
 
+    def test_chevereto_thumbnails_upgrade_to_original(self):
+        html = post('''<a href="https://goonbox.cr/img/AbC123x"><img src="https://simp6.cuckcapital.cr/images3/a.md.jpg"></a>
+            <img src="https://simp6.cuckcapital.cr/images3/b.th.png"><img src="/keep.md.txt.jpg">''')
+        self.assertEqual(extract_images(BeautifulSoup(html, "html.parser"), URL), [
+            "https://simp6.cuckcapital.cr/images3/a.jpg", "https://simp6.cuckcapital.cr/images3/b.png",
+            "https://simpcity.cr/keep.md.txt.jpg",
+        ])
+
     def test_picture_sources_and_attachment_section(self):
         html = post('<picture><source srcset="/large.webp 2x"><img src="/fallback.jpg"></picture>')
         html += '<div class="message-attachments"><a href="/attachments/image-png.456/">Image</a></div>'

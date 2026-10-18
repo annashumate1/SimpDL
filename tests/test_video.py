@@ -7,11 +7,11 @@ import subprocess
 import tempfile
 import threading
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from download_engine import ThreadClient, download_threads
 from site_utils import parse_media_page
-from video_utils import turbo_id, video_extension, video_identity
+from video_utils import bunkr_items, bunkr_route, resolve_bunkr, turbo_id, video_extension, video_identity
 
 URL = "https://simpcity.cr/threads/example.123/"
 
@@ -67,6 +67,29 @@ class VideoParsingTests(unittest.TestCase):
             self.assertEqual(turbo_id(f"https://turbo.cr/{path}/abcd?x=1"), "abcd")
             self.assertEqual(video_identity(f"https://turbo.cr/{path}/abcd"), "https://turbo.cr/embed/abcd")
         self.assertIsNone(turbo_id("https://turbo.cr.evil.example/d/abcd"))
+
+    def test_bunkr_mirrors_albums_and_preview_cards(self):
+        self.assertEqual(bunkr_route("https://bunkr.ac/a/Album123?advanced=1"), ("a", "Album123"))
+        self.assertEqual(video_identity("https://bunkr.cr/v/abc"), video_identity("https://bunkrr.su/f/abc"))
+        self.assertIsNone(bunkr_route("https://i-cake.bunkr.ru/thumbs/x.png"))
+        html = post('''<a href="https://bunkr.ac/a/Album123"><img src="https://i-cake.bunkr.ru/thumbs/x.png"></a>
+            <div class="bbCodeBlock bbCodeBlock--unfurl js-unfurl"><img src="https://gofile.io/logo.png"></div>''')
+        media, _ = parse_media_page(html, URL)
+        self.assertEqual([(m.kind, m.url) for m in media], [("embed", "https://bunkr.ac/a/Album123")])
+
+    def test_bunkr_album_expansion_and_signing(self):
+        album = '''window.albumFiles = [{ slug: "img1", type: "image/jpeg", }, { slug: "vid1", type: "video/mp4", },
+            { slug: "zip1", type: "application/zip", }];'''
+        with patch("video_utils._bunkr_page", return_value=(album, "")):
+            items = bunkr_items(None, "https://bunkr.cr/a/abc")
+        self.assertEqual([(m.kind, m.url) for m in items], [("image", "https://bunkr.cr/f/img1"), ("video", "https://bunkr.cr/f/vid1")])
+        page = 'var jsCDN = "https:\\/\\/c1-b.cdn.cr\\/storage\\/media\\/a%20b.mp4"; var signUrl = "https://sign.cdn.cr/sign";'
+        session = MagicMock()
+        session.get.return_value.__enter__.return_value.json.return_value = {"token": "t", "ex": 9}
+        with patch("video_utils._bunkr_page", return_value=(page, "https://bunkr.cr/f/vid1")):
+            url, referer = resolve_bunkr(session, "https://bunkr.cr/f/vid1")
+        self.assertEqual(url, "https://c1-b.cdn.cr/storage/media/a%20b.mp4?token=t&ex=9")
+        self.assertEqual(session.get.call_args.kwargs["params"], {"path": "/storage/media/a b.mp4"})
 
     def test_media_filter_and_cross_route_duplicates(self):
         client = Mock()

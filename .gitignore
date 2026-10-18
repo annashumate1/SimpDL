@@ -1,0 +1,8 @@
+# Local settings, cookies and thread lists stay on this machine.
+config/
+downloads/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.simpdl-*

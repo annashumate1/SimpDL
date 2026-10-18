@@ -2,14 +2,16 @@
 
 A desktop application for downloading images and videos from SimpCity threads.
 
-Paste thread links, choose a folder, and start downloading. The single-window interface includes media selection, page ranges, browser login, progress, and a download log.
+Paste thread links, choose a folder, and start downloading. The single-window interface follows your system's light or dark theme and shows live progress, counts and the download log.
 
 ## Features
 
 - Download images, videos, or both.
 - Follow thread pagination or select a page range.
 - Extract post images, lazy-loaded images, and full-size attachments.
+- Save the original, full-resolution file for goonbox (Chevereto) images instead of the resized preview.
 - Download direct videos and resolve Turbo player links.
+- Download every image and video in Bunkr albums and file links.
 - Handle supported external players and streams through [yt-dlp](https://github.com/yt-dlp/yt-dlp).
 - Organize files into separate thread folders and skip completed downloads.
 - Stop a running download and inspect failures in the log.
@@ -74,13 +76,13 @@ On Linux, if Playwright reports missing browser libraries, run `python -m playwr
 
 ## Usage
 
-1. Paste one thread URL per line into **Thread links**.
+1. Paste one thread URL per line into **Thread links**, or click **Paste**.
 2. Choose the **Save to** folder.
-3. Select **Images and videos**, **Images only**, or **Videos only**.
+3. Under **Download**, select **Both**, **Images**, or **Videos**.
 4. Select **Browser login** or **Saved cookies**.
 5. Click **Start download**.
 
-Use **Stop** to cancel and **View log** to inspect progress or failed links. Settings and thread links are saved when starting a download or closing the application.
+Use **Stop** to cancel. Progress, counts and failed links appear in the activity panel on the right. Settings and thread links are saved when starting a download or closing the application.
 
 ### Thread pages
 
@@ -101,7 +103,7 @@ To reuse an existing browser session:
 1. Sign in to SimpCity in your browser.
 2. Open Developer Tools, select **Network**, and reload the thread.
 3. Select the thread's request and copy its **Cookie** request header.
-4. Open **Cookie settings…** in SimpDL and paste the header.
+4. Open **Cookies…** in SimpDL and paste the header.
 5. Optionally enter the matching **User-Agent** header, then save.
 
 You can also run `python extract_cookie_header.py`. Cookies are stored locally; they are credentials and should not be included in issues, screenshots, or uploads.
@@ -113,6 +115,7 @@ You can also run `python extract_cookie_header.py`. Cookies are stored locally; 
 | Post images and image attachments | Lazy sources, responsive images, and direct full-size links |
 | Native video and direct video links | MP4, WebM, MOV, MKV, AVI, Ogg video, and MPEG containers |
 | Turbo links | `/d/`, `/v/`, and `/embed/` routes |
+| Bunkr albums and files | All mirror domains; every image and video in an album |
 | Supported external players, HLS, and DASH | Through yt-dlp; ffmpeg may be required |
 | External albums and live streams | Not expanded |
 
@@ -155,7 +158,7 @@ This creates `SimpDL-github/` and `SimpDL-github.zip` beside the project. It cop
 
 **The app cannot open a thread:** Try Browser login. If the browser itself cannot access the thread, resolve that access problem first. For saved sessions, refresh the cookies and matching User-Agent.
 
-**A video fails:** Check View log for the failed link. Update dependencies with `python -m pip install --upgrade -r requirements.txt`. Install ffmpeg if the host requires merging audio and video.
+**A video fails:** Check the activity log for the failed link. Update dependencies with `python -m pip install --upgrade -r requirements.txt`. Install ffmpeg if the host requires merging audio and video.
 
 **No new files are saved:** Check the selected media type, existing downloads, and the minimum image dimensions. External album pages are not expanded.
 

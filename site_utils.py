@@ -11,7 +11,11 @@ POST_SELECTOR = ".message-body .bbWrapper, .message-content .bbWrapper, .message
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".bmp")
 VIDEO_EXTENSIONS = (".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".ogv", ".mpeg", ".mpg")
 STREAM_EXTENSIONS = (".m3u8", ".mpd")
-VIDEO_HOSTS = ("turbo.cr", "cyberdrop.cr", "cyberdrop.me", "cyberdrop.to", "bunkr.cr", "bunkr.su", "bunkr.ru", "bunkr.si", "bunkr.site", "youtu.be", "youtube.com", "youtube-nocookie.com", "vimeo.com", "twitch.tv", "giphy.com", "redgifs.com", "streamable.com")
+# Chevereto hosts (goonbox.cr / cuckcapital.cr) embed name.md.jpg or name.th.jpg; name.jpg is the original.
+CHEVERETO_RESIZED = re.compile(r"\.(?:md|th)(\.(?:jpe?g|png|gif|webp|avif|bmp))$", re.I)
+VIDEO_HOSTS = ("turbo.cr", "cyberdrop.cr", "cyberdrop.me", "cyberdrop.to", "youtu.be", "youtube.com", "youtube-nocookie.com", "vimeo.com", "twitch.tv", "giphy.com", "redgifs.com", "streamable.com")
+# Bunkr rotates mirror domains (bunkr.cr, bunkr.ac, bunkrr.su, ...); its file pages all look alike.
+BUNKR_HOST = re.compile(r"(?:www\.)?bunkrr?\.[a-z]+")
 
 
 @dataclass(frozen=True)
@@ -30,9 +34,9 @@ def is_video_url(url):
 
 def is_video_host(url):
     parts = urlsplit(url)
-    return bool(parts.path.strip("/")) and any(
+    return bool(parts.path.strip("/")) and (BUNKR_HOST.fullmatch(parts.hostname or "") is not None or any(
         parts.hostname == host or (parts.hostname or "").endswith("." + host) for host in VIDEO_HOSTS
-    )
+    ))
 
 
 def thread_url(url, page=None):
@@ -102,6 +106,11 @@ def http_url(value, base_url):
     return urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, ""))
 
 
+def full_size(url):
+    parts = urlsplit(url)
+    return urlunsplit(parts._replace(path=CHEVERETO_RESIZED.sub(r"\1", parts.path)))
+
+
 def _direct_image(url):
     if is_video_url(url):
         return False
@@ -130,10 +139,13 @@ def extract_images(soup, page_url):
     found = []
     for body in soup.select(POST_SELECTOR):
         for image in body.select("img"):
-            if set(image.get("class", [])) & {"smilie", "emoji", "avatar"}:
+            # Link-preview cards only hold favicons and og:image thumbnails.
+            if set(image.get("class", [])) & {"smilie", "emoji", "avatar"} or image.find_parent(class_="js-unfurl"):
                 continue
             anchor = image.find_parent("a", href=True)
             linked = http_url(anchor.get("href"), page_url) if anchor else None
+            if linked and is_video_host(linked):
+                continue  # A poster for a video/album link; the link itself is downloaded.
             sources = [linked if linked and _direct_image(linked) else None]
             sources += [image.get(attr) for attr in ("data-full-url", "data-src", "data-original", "data-lazy-src")]
             sources += [_srcset(image.get("data-srcset") or image.get("srcset"))]
@@ -144,12 +156,12 @@ def extract_images(soup, page_url):
             for source in sources:
                 url = http_url(source, page_url)
                 if url:
-                    found.append(url)
+                    found.append(full_size(url))
                     break
         for anchor in body.select("a[href]"):
             url = http_url(anchor.get("href"), page_url)
             if url and _direct_image(url):
-                found.append(url)
+                found.append(full_size(url))
     return list(dict.fromkeys(found))
 
 

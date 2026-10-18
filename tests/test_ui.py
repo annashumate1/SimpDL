@@ -6,6 +6,8 @@ from pathlib import Path
 import tempfile
 import time
 import tkinter as tk
+
+import customtkinter as ctk
 import unittest
 from unittest.mock import Mock, patch
 
@@ -17,7 +19,7 @@ URL = "https://simpcity.cr/threads/example.123/"
 class InterfaceTests(unittest.TestCase):
     def setUp(self):
         try:
-            self.root = tk.Tk()
+            self.root = ctk.CTk()
         except tk.TclError as error:
             self.skipTest(f"No graphical display: {error}")
         self.root.withdraw()
@@ -59,12 +61,13 @@ class InterfaceTests(unittest.TestCase):
         with patch("app_ui.ThreadClient", return_value=client):
             self.app.start()
             self.assertTrue(self.app.running)
-            self.assertEqual(str(self.app.start_button["state"]), "disabled")
+            self.assertEqual(self.app.start_button.cget("state"), "disabled")
             self.pump_until(lambda: not self.app.running)
         self.assertEqual(self.app.status.get(), "Finished")
         self.assertIn("1 images and 1 videos saved", self.app.summary.get())
-        self.assertEqual(str(self.app.start_button["state"]), "normal")
-        self.assertEqual(str(self.app.media_menu["state"]), "readonly")
+        self.assertEqual(self.app.start_button.cget("state"), "normal")
+        self.assertEqual(self.app.media_menu.cget("state"), "normal")
+        self.assertEqual((self.app.counts["Images"].get(), self.app.counts["Videos"].get()), ("1", "1"))
         self.assertEqual(json.loads(self.config.read_text())["retained_setting"], "unchanged")
 
     def test_invalid_url_shows_inline_error(self):
@@ -75,7 +78,7 @@ class InterfaceTests(unittest.TestCase):
             client.assert_not_called()
         self.assertFalse(self.app.running)
         self.assertEqual(self.app.status.get(), "Could not start")
-        self.assertEqual(str(self.app.start_button["state"]), "normal")
+        self.assertEqual(self.app.start_button.cget("state"), "normal")
 
     def test_stop_video_download(self):
         client = self.client('<video src="/video.mp4"></video>')
@@ -102,12 +105,28 @@ class InterfaceTests(unittest.TestCase):
             self.pump_until(lambda: not self.app.running)
             self.assertEqual(factory.call_args.args[0], {})
 
-    def test_log_opens_and_updates(self):
+    def test_log_updates_and_stays_read_only(self):
         self.app._append_log("First message")
-        self.app.show_log()
         self.app._append_log("Second message")
         self.assertIn("Second message", self.app.log_text.get("1.0", "end"))
-        self.assertEqual(str(self.app.log_text["state"]), "disabled")
+        self.assertEqual(self.app.log_text.cget("state"), "disabled")
+
+    def test_media_toggle_saves_engine_choice(self):
+        self.app.media_menu.set("Videos")
+        self.app.media_menu._command("Videos")
+        self.app._persist()
+        self.assertEqual(json.loads(self.config.read_text())["media_choice"], "Videos only")
+
+    def test_paste_adds_links_once_and_counts_them(self):
+        self.root.clipboard_clear()
+        self.root.clipboard_append(f"{URL}\nnot a link\nhttps://simpcity.cr/threads/other.9/")
+        self.app.paste()
+        self.assertEqual(self.app._url_lines(), [URL, "https://simpcity.cr/threads/other.9/"])
+        self.assertEqual(self.app.thread_count.cget("text"), "2 links")
+
+    def test_resize_repaint_runs(self):
+        self.app._schedule_repaint(Mock(widget=self.root))
+        self.pump_until(lambda: self.app._repaint_id is None)
 
 
 if __name__ == "__main__":

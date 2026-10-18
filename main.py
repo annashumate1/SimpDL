@@ -2,7 +2,7 @@
 
 import json
 import os
-import tkinter as tk
+import customtkinter as ctk
 from pathlib import Path
 
 from app_ui import DownloadApp, configure_style
@@ -74,15 +74,15 @@ def ensure_first_run_defaults(script_dir: str) -> dict:
 
 def main_gui():
     script_dir = Path(__file__).resolve().parent
-    ensure_first_run_defaults(str(script_dir))
-    app = tk.Tk()
+    config = ensure_first_run_defaults(str(script_dir))
+    app = ctk.CTk()
     app.title("SimpDL")
-    app.geometry("860x720")
-    configure_style(app)
+    app.geometry("1120x760")
+    configure_style(app, config.get("appearance", "System"))
     view = DownloadApp(app, script_dir / "config" / "config.json", script_dir / "config" / "urls.txt")
     view.pack(fill="both", expand=True)
     app.update_idletasks()
-    app.minsize(max(720, view.winfo_reqwidth()), view.winfo_reqheight())
+    app.minsize(760, 600)
     app.protocol("WM_DELETE_WINDOW", view.close)
     app.mainloop()
 

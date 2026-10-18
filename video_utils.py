@@ -6,9 +6,9 @@ from pathlib import Path
 import re
 import shutil
 import tempfile
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlencode, urlsplit
 
-from site_utils import STREAM_EXTENSIONS, http_url
+from site_utils import BUNKR_HOST, STREAM_EXTENSIONS, MediaItem, http_url
 
 
 def turbo_id(url):
@@ -19,9 +19,64 @@ def turbo_id(url):
     return match[1] if match else None
 
 
+def bunkr_route(url):
+    """("a", album id) or ("f", file slug) for a Bunkr page on any mirror domain."""
+    parts = urlsplit(url)
+    match = re.fullmatch(r"/([afvi])/([A-Za-z0-9_-]+)/?", parts.path)
+    if not BUNKR_HOST.fullmatch(parts.hostname or "") or not match:
+        return None
+    return ("a" if match[1] == "a" else "f"), match[2]
+
+
 def video_identity(url):
     identifier = turbo_id(url)
+    route = bunkr_route(url)
+    if route and route[0] == "f":
+        return f"bunkr:{route[1]}"
     return f"https://turbo.cr/embed/{identifier}" if identifier else url
+
+
+def _bunkr_page(session, url):
+    with session.get(url, timeout=(15, 30)) as response:
+        response.raise_for_status()
+        return response.text, response.url
+
+
+def _media_kind(mime):
+    return "image" if mime.startswith("image/") else "video" if mime.startswith("video/") else None
+
+
+def bunkr_items(session, url):
+    """Expand a Bunkr album or file link into image/video items (other file types are skipped)."""
+    kind, identifier = bunkr_route(url)
+    host = urlsplit(url).hostname
+    if kind == "f":
+        text, _ = _bunkr_page(session, f"https://{host}/f/{identifier}")
+        mime = re.search(r'var jsType\s*=\s*"([^"]*)"', text)
+        found = [(identifier, json.loads(f'"{mime[1]}"'))] if mime else []
+    else:
+        # ?advanced=1 embeds every file of the album as JSON instead of 100 per page.
+        text, _ = _bunkr_page(session, f"https://{host}/a/{identifier}?advanced=1")
+        found = re.findall(r'slug:\s*"([A-Za-z0-9_-]+)",\s*type:\s*"([^"]*)"', text)
+    if not found:
+        raise ValueError("Bunkr listed no files; the album may be empty, removed, or changed its layout")
+    return [MediaItem(f"https://{host}/f/{slug}", _media_kind(mime)) for slug, mime in found if _media_kind(mime)]
+
+
+def resolve_bunkr(session, url):
+    """Sign the original file's CDN path the same way Bunkr's own player does."""
+    text, page_url = _bunkr_page(session, url)
+    values = dict(re.findall(r'var (jsCDN|signUrl)\s*=\s*"([^"]*)"', text))
+    media_url = http_url(json.loads(f'"{values.get("jsCDN", "")}"'), page_url)
+    sign_url = http_url(values.get("signUrl"), page_url)
+    if not media_url or not sign_url:
+        raise ValueError("Bunkr file page has no download URL; the file may have been removed")
+    with session.get(sign_url, params={"path": unquote(urlsplit(media_url).path)}, timeout=(15, 30)) as response:
+        response.raise_for_status()
+        data = response.json()
+    if not data.get("token"):
+        raise ValueError("Bunkr would not sign the download URL")
+    return f"{media_url}?{urlencode({'token': data['token'], 'ex': data.get('ex', '')})}", page_url
 
 
 def video_extension(header):
@@ -89,6 +144,9 @@ class VideoDownloader:
         if turbo_id(url):
             self.log("Resolving Turbo video…")
             url, referer = self.resolve_turbo(url)
+            embedded = False
+        elif bunkr_route(url):
+            url, referer = resolve_bunkr(self.session, url)
             embedded = False
         streaming = urlsplit(url).path.lower().endswith(STREAM_EXTENSIONS)
         with tempfile.TemporaryDirectory(prefix=".simpdl-video-", dir=directory) as working:

@@ -10,9 +10,11 @@ from urllib.parse import urlsplit
 
 from PIL import Image
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util import Retry
 
 from site_utils import POST_SELECTOR, parse_cookies, parse_page, parse_media_page, thread_folder, thread_key, thread_url
-from video_utils import VideoDownloader, video_identity
+from video_utils import VideoDownloader, bunkr_items, bunkr_route, resolve_bunkr, video_identity
 
 DEFAULT_USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
 FORMATS = {"JPEG": ".jpg", "PNG": ".png", "GIF": ".gif", "WEBP": ".webp", "AVIF": ".avif", "BMP": ".bmp"}
@@ -35,6 +37,10 @@ class ThreadClient:
         self.browser_mode = browser_mode
         self.cookie_data = cookie_data
         self.session = requests.Session()
+        # File-host CDN nodes (notably Bunkr's) answer with sporadic 502s; the final response still reaches callers.
+        retry = Retry(total=4, backoff_factor=1, status_forcelist=(429, 500, 502, 503, 504), raise_on_status=False)
+        self.session.mount("https://", HTTPAdapter(max_retries=retry))
+        self.session.mount("http://", HTTPAdapter(max_retries=retry))
         self.session.headers.update({
             "User-Agent": cookie_data.get("user_agent") or DEFAULT_USER_AGENT,
             "Accept-Language": "en-US,en;q=0.9",
@@ -107,6 +113,8 @@ class ThreadClient:
 
     def save_image(self, url, referer, directory, cancelled=lambda: False):
         """Fetch once, verify actual image bytes, and atomically save by content hash."""
+        if bunkr_route(url):
+            url, referer = resolve_bunkr(self.session, url)
         content = bytearray()
         with self.session.get(url, headers={"Referer": referer}, stream=True, timeout=(15, 45)) as response:
             response.raise_for_status()
@@ -136,6 +144,23 @@ class ThreadClient:
 
     def save_video(self, url, referer, directory, cancelled=lambda: False, embedded=False):
         return self.video_downloader.save(url, referer, directory, cancelled, embedded)
+
+
+def expand_hosts(client, media, log, result):
+    """Replace Bunkr album/file links with the files they contain; a failed album is logged, not fatal."""
+    expanded = []
+    for item in media:
+        if not bunkr_route(item.url):
+            expanded.append(item)
+            continue
+        try:
+            files = bunkr_items(client.session, item.url)
+            log(f"Bunkr link has {len(files)} images/videos: {item.url}")
+            expanded += files
+        except Exception as error:
+            result.errors += 1
+            log(f"Bunkr link failed ({item.url}): {error}")
+    return list(dict.fromkeys(expanded))
 
 
 def download_threads(client, urls, output_directory, log=print, progress=lambda *args: None,
@@ -175,6 +200,7 @@ def download_threads(client, urls, output_directory, log=print, progress=lambda 
             if thread_key(final_url) != thread_key(url):
                 raise ValueError("Thread redirected to a different thread; check the URL")
             media, following = parse_media_page(html, final_url)
+            media = expand_hosts(client, media, log, result)
             media = [item for item in media if ("image" if item.kind == "image" else "video") in media_types]
             visited.add(thread_url(final_url))
             result.pages += 1

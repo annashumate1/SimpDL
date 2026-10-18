@@ -3,3 +3,4 @@ beautifulsoup4
 Pillow
 playwright
 yt-dlp
+customtkinter
