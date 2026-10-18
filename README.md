@@ -13,8 +13,9 @@ Paste thread links, choose a folder, and start downloading. The single-window in
 - Download direct videos and resolve Turbo player links.
 - Download every image and video in Bunkr albums and file links.
 - Handle supported external players and streams through [yt-dlp](https://github.com/yt-dlp/yt-dlp).
+- Download files in the order they appear in the thread (sort the folder by date modified to match).
 - Organize files into separate thread folders and skip completed downloads.
-- Stop a running download and inspect failures in the log.
+- Stop a running download, skip a stuck file, and inspect failures in the log.
 
 ## Requirements
 
@@ -82,7 +83,7 @@ On Linux, if Playwright reports missing browser libraries, run `python -m playwr
 4. Select **Browser login** or **Saved cookies**.
 5. Click **Start download**.
 
-Use **Stop** to cancel. Progress, counts and failed links appear in the activity panel on the right. Settings and thread links are saved when starting a download or closing the application.
+Use **Stop** to cancel the run, or **Skip file** to abandon only the file that is downloading (for example a stuck or very slow video) and continue with the next one. Progress, counts and failed links appear in the activity panel on the right. Settings and thread links are saved when starting a download or closing the application.
 
 ### Thread pages
 

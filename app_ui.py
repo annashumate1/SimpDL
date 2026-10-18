@@ -48,6 +48,17 @@ def size_text(size):
         size /= 1024
 
 
+def transfer_label(done, total, rate=0):
+    """'12.0 MB of 50.0 MB · 4.0 MB/s · 0:10 left'; speed and time appear once a rate is known."""
+    text = f"{size_text(done)} of {size_text(total)}" if total else f"{size_text(done)} downloaded"
+    if rate > 0:
+        text += f" · {size_text(rate)}/s"
+        if total > done:
+            seconds = int((total - done) / rate)
+            text += f" · {seconds // 60}:{seconds % 60:02d} left"
+    return text
+
+
 def font(size=13, weight="normal"):
     return ctk.CTkFont(size=size, weight=weight)
 
@@ -82,6 +93,7 @@ class DownloadApp(ctk.CTkFrame):
         self.cookie_path = self.config_path.parent / "manual_cookies.json"
         self.events = queue.Queue()
         self.stop_event = threading.Event()
+        self.skip_event = threading.Event()
         self.running = self.closing = False
         self.messages = []
         self.editable = []
@@ -101,6 +113,7 @@ class DownloadApp(ctk.CTkFrame):
         self.status = tk.StringVar(value="Ready")
         self.summary = tk.StringVar(value="Add a thread link, then press Start download.")
         self.transfer_text = tk.StringVar()
+        self.transfer_started = None  # (monotonic time, bytes) of the current file's first update
         self.counts = {name: tk.StringVar(value="0") for name in ("Pages", "Images", "Videos", "Errors")}
         self._load_logo()
         self._build()
@@ -262,11 +275,13 @@ class DownloadApp(ctk.CTkFrame):
 
         actions = ctk.CTkFrame(box, fg_color="transparent")
         actions.grid(row=5, column=0, sticky="ew", padx=20, pady=(14, 20))
-        actions.grid_columnconfigure(1, weight=1)
-        self.stop_button = button(actions, "Stop", self.stop, state="disabled", width=96, height=44)
+        actions.grid_columnconfigure(2, weight=1)
+        self.stop_button = button(actions, "Stop", self.stop, state="disabled", width=80, height=44)
         self.stop_button.grid(row=0, column=0, sticky="w")
+        self.skip_button = button(actions, "Skip file", self.skip, state="disabled", width=96, height=44)
+        self.skip_button.grid(row=0, column=1, sticky="w", padx=(10, 0))
         self.start_button = button(actions, "Start download", self.start, primary=True, height=44, font=font(15, "bold"))
-        self.start_button.grid(row=0, column=1, sticky="ew", padx=(10, 0))
+        self.start_button.grid(row=0, column=2, sticky="ew", padx=(10, 0))
         return box
 
     def _set_appearance(self, value):
@@ -464,6 +479,7 @@ class DownloadApp(ctk.CTkFrame):
             self._error(str(error))
             return
         self.stop_event.clear()
+        self.skip_event.clear()
         self._set_running(True)
         self._set_status("Starting download…")
         self.summary.set("Preparing your threads.")
@@ -472,19 +488,20 @@ class DownloadApp(ctk.CTkFrame):
         for value in self.counts.values():
             value.set("0")
         self._append_log("Starting download")
-        threading.Thread(target=self._run, args=(self.events, self.stop_event, urls, output, cookies, browser, self.follow.get(), MEDIA_CHOICES[self.media.get()]), daemon=True).start()
+        threading.Thread(target=self._run, args=(self.events, self.stop_event, self.skip_event, urls, output, cookies, browser, self.follow.get(), MEDIA_CHOICES[self.media.get()]), daemon=True).start()
 
     def _set_running(self, running):
         self.running = running
         state = "disabled" if running else "normal"
         self.start_button.configure(state=state, text="Downloading…" if running else "Start download")
         self.stop_button.configure(state="normal" if running else "disabled")
+        self.skip_button.configure(state="normal" if running else "disabled")
         self.urls.configure(state=state)
         for widget in self.editable + [self.media_menu, self.access_menu]:
             widget.configure(state=state)
 
     @staticmethod
-    def _run(events, stop_event, urls, output, cookies, browser, follow, media_types):
+    def _run(events, stop_event, skip_event, urls, output, cookies, browser, follow, media_types):
         last_update = 0
 
         def transfer(done, total):
@@ -498,14 +515,22 @@ class DownloadApp(ctk.CTkFrame):
             with ThreadClient(cookies, log=lambda message: events.put(("log", message)), browser_mode=browser, transfer=transfer) as client:
                 result = download_threads(client, urls, output, log=lambda message: events.put(("log", message)),
                                           progress=lambda *values: events.put(("progress", values)),
-                                          cancelled=stop_event.is_set, follow_pagination=follow, media_types=media_types)
+                                          cancelled=stop_event.is_set, follow_pagination=follow, media_types=media_types, skip=skip_event)
             events.put(("done", result))
         except Exception as error:
             events.put(("failed", str(error)))
 
+    def skip(self):
+        """Abandon only the file in progress; the run continues with the next one."""
+        if self.running and not self.stop_event.is_set():
+            self.skip_event.set()
+            self._set_status("Skipping current file…")
+            self.transfer_text.set("")
+
     def stop(self):
         self.stop_event.set()
         self.stop_button.configure(state="disabled")
+        self.skip_button.configure(state="disabled")
         self._set_status("Stopping…")
         self.summary.set("Waiting for the current network request to finish.")
 
@@ -545,7 +570,12 @@ class DownloadApp(ctk.CTkFrame):
                 self.transfer_text.set("")
             elif kind == "transfer":
                 done, total = payload
-                self.transfer_text.set(f"{size_text(done)} of {size_text(total)}" if total else f"{size_text(done)} downloaded")
+                now = time.monotonic()
+                if self.transfer_started is None or done < self.transfer_started[1]:
+                    self.transfer_started = (now, done)  # A new file started.
+                started, base = self.transfer_started
+                elapsed = now - started
+                self.transfer_text.set(transfer_label(done, total, (done - base) / elapsed if elapsed >= 0.5 else 0))
                 if total:
                     self.progress.set(done / total)
             elif kind in ("done", "failed"):

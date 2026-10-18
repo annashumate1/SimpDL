@@ -11,9 +11,16 @@ import customtkinter as ctk
 import unittest
 from unittest.mock import Mock, patch
 
-from app_ui import DownloadApp, configure_style
+from app_ui import DownloadApp, configure_style, transfer_label
 
 URL = "https://simpcity.cr/threads/example.123/"
+
+
+class TransferLabelTests(unittest.TestCase):
+    def test_speed_and_time_left(self):
+        self.assertEqual(transfer_label(10 * 2**20, 50 * 2**20), "10.0 MB of 50.0 MB")
+        self.assertEqual(transfer_label(10 * 2**20, 50 * 2**20, 4 * 2**20), "10.0 MB of 50.0 MB · 4.0 MB/s · 0:10 left")
+        self.assertEqual(transfer_label(3 * 2**20, 0, 2**20), "3.0 MB downloaded · 1.0 MB/s")
 
 
 class InterfaceTests(unittest.TestCase):
@@ -96,6 +103,27 @@ class InterfaceTests(unittest.TestCase):
             self.pump_until(lambda: not self.app.running)
         self.assertEqual(self.app.status.get(), "Stopped")
         self.assertIn("0 errors", self.app.summary.get())
+
+    def test_skip_button_moves_on_to_next_file(self):
+        client = self.client('<video src="/stuck.mp4"></video><video src="/next.mp4"></video>')
+
+        def save(url, referer, directory, cancelled, **kwargs):
+            if url.endswith("stuck.mp4"):
+                while not cancelled():
+                    time.sleep(0.01)
+                raise InterruptedError("Cancelled")
+            return True
+
+        client.save_video.side_effect = save
+        with patch("app_ui.ThreadClient", return_value=client):
+            self.app.start()
+            self.assertEqual(self.app.skip_button.cget("state"), "normal")
+            self.pump_until(lambda: client.save_video.called)
+            self.app.skip()
+            self.pump_until(lambda: not self.app.running)
+        self.assertEqual(self.app.status.get(), "Finished")
+        self.assertIn("1 videos saved · 1 skipped · 0 errors", self.app.summary.get())
+        self.assertEqual(self.app.skip_button.cget("state"), "disabled")
 
     def test_browser_login_does_not_require_valid_cookie_file(self):
         self.app.cookie_path.write_text("invalid json")

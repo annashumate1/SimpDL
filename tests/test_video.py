@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import time
 import threading
 import unittest
 from unittest.mock import MagicMock, Mock, patch
@@ -58,6 +59,12 @@ class VideoParsingTests(unittest.TestCase):
             ("video", "https://simpcity.cr/playlist.m3u8?token=123"),
         ])
 
+    def test_images_and_videos_keep_page_order(self):
+        html = post('''<img src="/1.jpg"><video src="/2.mp4"></video><a href="https://cdn.example/3.png">3</a>
+            <iframe src="https://turbo.cr/embed/four"></iframe><img src="/5.jpg">''') + post('<video src="/6.webm"></video><img src="/7.jpg">')
+        media, _ = parse_media_page(html, URL)
+        self.assertEqual([m.url.rsplit("/", 1)[-1] for m in media], ["1.jpg", "2.mp4", "3.png", "four", "5.jpg", "6.webm", "7.jpg"])
+
     def test_video_attachment_is_not_also_an_image(self):
         media, _ = parse_media_page(post('<video src="/attachments/clip.42/"></video><a href="/attachments/clip.42/">file</a>'), URL)
         self.assertEqual([(m.kind, m.url) for m in media], [("video", "https://simpcity.cr/attachments/clip.42/")])
@@ -108,6 +115,25 @@ class VideoParsingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             result = download_threads(client, [URL], directory, log=lambda _: None)
         self.assertEqual((result.videos, result.errors), (1, 1))
+
+    def test_skip_abandons_only_the_current_file(self):
+        skip = threading.Event()
+        client = Mock()
+        client.fetch_page.return_value = (post('<video src="/stuck.mp4"></video><video src="/next.mp4"></video>'), URL)
+
+        def save(url, referer, directory, cancelled, **kwargs):
+            if url.endswith("stuck.mp4"):
+                skip.set()  # As if the user pressed Skip while this file hangs.
+                while not cancelled():
+                    time.sleep(0.01)
+                raise InterruptedError("Download cancelled")
+            self.assertFalse(cancelled())  # The skip must not leak into the next file.
+            return True
+
+        client.save_video.side_effect = save
+        with tempfile.TemporaryDirectory() as directory:
+            result = download_threads(client, [URL], directory, log=lambda _: None, skip=skip)
+        self.assertEqual((result.videos, result.skipped, result.errors, result.cancelled), (1, 1, 0, False))
 
     def test_signatures_reject_error_pages_and_images(self):
         self.assertEqual(video_extension(b"\x00\x00\x00\x20ftypisom"), ".mp4")

@@ -134,35 +134,72 @@ def _srcset(value):
     return max(candidates, default=(0, None))[1]
 
 
+def _image_url(image, page_url):
+    """Full-size source of a post image, or None for icons, previews and video posters."""
+    # Link-preview cards only hold favicons and og:image thumbnails.
+    if set(image.get("class", [])) & {"smilie", "emoji", "avatar"} or image.find_parent(class_="js-unfurl"):
+        return None
+    anchor = image.find_parent("a", href=True)
+    linked = http_url(anchor.get("href"), page_url) if anchor else None
+    if linked and is_video_host(linked):
+        return None  # A poster for a video/album link; the link itself is downloaded.
+    sources = [linked if linked and _direct_image(linked) else None]
+    sources += [image.get(attr) for attr in ("data-full-url", "data-src", "data-original", "data-lazy-src")]
+    sources += [_srcset(image.get("data-srcset") or image.get("srcset"))]
+    picture = image.find_parent("picture")
+    if picture:
+        sources += [_srcset(source.get("data-srcset") or source.get("srcset")) for source in picture.select("source")]
+    sources += [image.get("src"), image.get("data-url")]
+    for source in sources:
+        url = http_url(source, page_url)
+        if url:
+            return full_size(url)
+    return None
+
+
+def _video_item(node, page_url):
+    if node.name == "video":
+        values = [node.get("data-src"), node.get("src")]
+        for source in node.select("source"):
+            values.extend([source.get("data-src"), source.get("src")])
+        for value in values:
+            url = http_url(value, page_url)
+            if url:
+                return MediaItem(url, "video")  # Alternative encodings are the same video.
+        return None
+    if node.name == "a":
+        url = http_url(node.get("href"), page_url)
+        typed = node.get("type", "").startswith("video/")
+        if not url or not (is_video_url(url) or is_video_host(url) or typed):
+            return None
+        return MediaItem(url, "video" if is_video_url(url) or typed else "embed")
+    url = http_url(node.get("data-video-url") or node.get("data-src") or node.get("src"), page_url)
+    return MediaItem(url, "video" if node.has_attr("data-video-url") or is_video_url(url) else "embed") if url else None
+
+
+def extract_media(soup, page_url):
+    """Post images and videos in the order they appear on the page."""
+    found = {}
+    for body in soup.select(POST_SELECTOR):
+        for node in body.select("img, video, iframe, [data-video-url], a[href]"):
+            if node.name == "img":
+                url = _image_url(node, page_url)
+                if url:
+                    found.setdefault(url, MediaItem(url, "image"))
+                continue
+            video = _video_item(node, page_url)
+            if video:
+                found[video.url] = video  # A video replaces an image entry for the same URL.
+            elif node.name == "a":
+                url = http_url(node.get("href"), page_url)
+                if url and _direct_image(url):
+                    found.setdefault(full_size(url), MediaItem(full_size(url), "image"))
+    return list(found.values())
+
+
 def extract_images(soup, page_url):
     """Only post content; prefer full-size links and lazy sources to thumbnails."""
-    found = []
-    for body in soup.select(POST_SELECTOR):
-        for image in body.select("img"):
-            # Link-preview cards only hold favicons and og:image thumbnails.
-            if set(image.get("class", [])) & {"smilie", "emoji", "avatar"} or image.find_parent(class_="js-unfurl"):
-                continue
-            anchor = image.find_parent("a", href=True)
-            linked = http_url(anchor.get("href"), page_url) if anchor else None
-            if linked and is_video_host(linked):
-                continue  # A poster for a video/album link; the link itself is downloaded.
-            sources = [linked if linked and _direct_image(linked) else None]
-            sources += [image.get(attr) for attr in ("data-full-url", "data-src", "data-original", "data-lazy-src")]
-            sources += [_srcset(image.get("data-srcset") or image.get("srcset"))]
-            picture = image.find_parent("picture")
-            if picture:
-                sources += [_srcset(source.get("data-srcset") or source.get("srcset")) for source in picture.select("source")]
-            sources += [image.get("src"), image.get("data-url")]
-            for source in sources:
-                url = http_url(source, page_url)
-                if url:
-                    found.append(full_size(url))
-                    break
-        for anchor in body.select("a[href]"):
-            url = http_url(anchor.get("href"), page_url)
-            if url and _direct_image(url):
-                found.append(full_size(url))
-    return list(dict.fromkeys(found))
+    return [item.url for item in extract_media(soup, page_url) if item.kind == "image"]
 
 
 def page_error(soup, url, status=200):
@@ -195,35 +232,6 @@ def parse_page(html, url, status=200):
     if error:
         raise ValueError(error)
     return extract_images(soup, url), next_page(soup, url)
-
-
-def extract_media(soup, page_url):
-    videos = {}
-    for body in soup.select(POST_SELECTOR):
-        for video in body.select("video"):
-            values = [video.get("data-src"), video.get("src")]
-            for source in video.select("source"):
-                values.extend([source.get("data-src"), source.get("src")])
-            for value in values:
-                url = http_url(value, page_url)
-                if url:
-                    videos[url] = MediaItem(url, "video")
-                    break  # Alternative encodings are the same video.
-        for node in body.select("iframe, [data-video-url], a[href]"):
-            if node.name == "a":
-                value = node.get("href")
-                url = http_url(value, page_url)
-                if not url or not (is_video_url(url) or is_video_host(url) or node.get("type", "").startswith("video/")):
-                    continue
-                kind = "video" if is_video_url(url) or node.get("type", "").startswith("video/") else "embed"
-            else:
-                value = node.get("data-video-url") or node.get("data-src") or node.get("src")
-                url = http_url(value, page_url)
-                kind = "video" if node.has_attr("data-video-url") or (url and is_video_url(url)) else "embed"
-            if url:
-                videos[url] = MediaItem(url, kind)
-    images = [MediaItem(url, "image") for url in extract_images(soup, page_url) if url not in videos]
-    return images + list(videos.values())
 
 
 def parse_media_page(html, url, status=200):

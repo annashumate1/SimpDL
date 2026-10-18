@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
+import threading
 import time
 from urllib.parse import urlsplit
 
@@ -164,7 +165,10 @@ def expand_hosts(client, media, log, result):
 
 
 def download_threads(client, urls, output_directory, log=print, progress=lambda *args: None,
-                     cancelled=lambda: False, follow_pagination=True, delay=1.0, media_types=("image", "video")):
+                     cancelled=lambda: False, follow_pagination=True, delay=1.0, media_types=("image", "video"), skip=None):
+    """`skip` is an Event the caller sets to abandon only the file currently downloading."""
+    skip = skip or threading.Event()
+    file_cancelled = lambda: cancelled() or skip.is_set()
     media_types = set(media_types)
     if not media_types or not media_types <= {"image", "video"}:
         raise ValueError("Choose images, videos, or both")
@@ -215,12 +219,13 @@ def download_threads(client, urls, output_directory, log=print, progress=lambda 
                 kind = "image" if item.kind == "image" else "video"
                 media_key = (thread_key(url), item.url if kind == "image" else video_identity(item.url))
                 if media_key not in seen_media:
+                    skip.clear()  # A skip pressed between files must not hit the next one.
                     try:
                         log(f"Downloading {kind} {index}/{len(media)} from {urlsplit(item.url).hostname}")
                         if kind == "image":
-                            saved = client.save_image(item.url, final_url, directory, cancelled)
+                            saved = client.save_image(item.url, final_url, directory, file_cancelled)
                         else:
-                            saved = client.save_video(item.url, final_url, directory, cancelled, embedded=item.kind == "embed")
+                            saved = client.save_video(item.url, final_url, directory, file_cancelled, embedded=item.kind == "embed")
                         if saved:
                             result.saved += 1
                             if kind == "image":
@@ -232,7 +237,10 @@ def download_threads(client, urls, output_directory, log=print, progress=lambda 
                             result.skipped += 1
                         seen_media.add(media_key)
                     except InterruptedError:
-                        raise
+                        if cancelled() or not skip.is_set():
+                            raise
+                        result.skipped += 1
+                        log(f"Skipped {kind} {index}/{len(media)} at your request")
                     except Exception as error:
                         result.errors += 1
                         log(f"{kind.capitalize()} failed ({item.url}): {error}")
