@@ -137,6 +137,7 @@ class InterfaceTests(unittest.TestCase):
         self.app._append_log("First message")
         self.app._append_log("Second message")
         self.assertIn("Second message", self.app.log_text.get("1.0", "end"))
+        self.assertNotIn("will appear here", self.app.log_text.get("1.0", "end"))
         self.assertEqual(self.app.log_text.cget("state"), "disabled")
 
     def test_media_toggle_saves_engine_choice(self):

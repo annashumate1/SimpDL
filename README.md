@@ -4,6 +4,12 @@ A desktop application for downloading images and videos from SimpCity threads.
 
 Paste thread links, choose a folder, and start downloading. The single-window interface follows your system's light or dark theme and shows live progress, counts and the download log.
 
+![SimpDL downloading a thread](docs/demo.gif)
+
+| Light theme | Dark theme, downloading |
+| --- | --- |
+| ![SimpDL ready to download in the light theme](docs/idle-light.png) | ![SimpDL downloading a video in the dark theme](docs/downloading-dark.png) |
+
 ## Features
 
 - Download images, videos, or both.

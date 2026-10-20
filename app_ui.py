@@ -599,9 +599,12 @@ class DownloadApp(ctk.CTkFrame):
                     return
 
     def _append_log(self, message):
+        first = not self.messages
         self.messages.append(message)
         del self.messages[:-LOG_LINES]
         self.log_text.configure(state="normal")
+        if first:
+            self.log_text.delete("1.0", "end")  # Drop the "activity will appear here" placeholder.
         self.log_text.insert("end", message + "\n")
         if int(self.log_text.index("end-1c").split(".")[0]) > LOG_LINES:
             self.log_text.delete("1.0", "2.0")
