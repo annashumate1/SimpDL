@@ -59,6 +59,12 @@ def transfer_label(done, total, rate=0):
     return text
 
 
+def needs_repaint_workaround(widget):
+    # Unpainted CustomTkinter labels after a resize only happen on X11 (including XWayland).
+    # On Windows the full redraw re-shows the window to recolor its title bar, so it must not run there.
+    return widget.tk.call("tk", "windowingsystem") == "x11"
+
+
 def font(size=13, weight="normal"):
     return ctk.CTkFont(size=size, weight=weight)
 
@@ -118,15 +124,19 @@ class DownloadApp(ctk.CTkFrame):
         self._load_logo()
         self._build()
         self.window.bind("<Control-Return>", lambda event: self.start())
-        self.window.bind("<Configure>", self._schedule_repaint, add="+")
-        self._repaint_id = None
+        if needs_repaint_workaround(self.window):
+            self.window.bind("<Configure>", self._schedule_repaint, add="+")
+        self._repaint_id = self._repaint_size = None
         self._destroyed = False
         self._poll_id = self.after(80, self._poll)
 
     def _schedule_repaint(self, event):
         # Tiling/Wayland window managers resize the window after it maps and some CustomTkinter
         # labels are left unpainted (white boxes); a full redraw once resizing settles fixes it.
-        if event.widget is self.window and not self._destroyed:
+        # Only size changes count: window moves also fire <Configure> and need no redraw.
+        size = (event.width, event.height)
+        if event.widget is self.window and size != self._repaint_size and not self._destroyed:
+            self._repaint_size = size
             if self._repaint_id:
                 self.after_cancel(self._repaint_id)
             self._repaint_id = self.after(200, self._repaint)

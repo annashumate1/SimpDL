@@ -153,9 +153,25 @@ class InterfaceTests(unittest.TestCase):
         self.assertEqual(self.app._url_lines(), [URL, "https://simpcity.cr/threads/other.9/"])
         self.assertEqual(self.app.thread_count.cget("text"), "2 links")
 
-    def test_resize_repaint_runs(self):
-        self.app._schedule_repaint(Mock(widget=self.root))
+    def test_resize_repaint_runs_once_per_size(self):
+        self.app._schedule_repaint(Mock(widget=self.root, width=900, height=700))
         self.pump_until(lambda: self.app._repaint_id is None)
+        self.app._repaint_size = (900, 700)
+        # A redraw or window move reports the same size again; that must not start another redraw.
+        self.app._schedule_repaint(Mock(widget=self.root, width=900, height=700))
+        self.assertIsNone(self.app._repaint_id)
+        self.app._schedule_repaint(Mock(widget=self.root, width=1000, height=700))
+        self.assertIsNotNone(self.app._repaint_id)
+
+    def test_repaint_workaround_only_on_x11(self):
+        window = ctk.CTk()
+        window.withdraw()
+        try:
+            with patch("app_ui.needs_repaint_workaround", return_value=False):
+                DownloadApp(window, self.config, self.urls)
+            self.assertNotIn("_schedule_repaint", window.bind("<Configure>"))
+        finally:
+            window.destroy()
 
 
 if __name__ == "__main__":
