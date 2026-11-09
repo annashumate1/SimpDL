@@ -79,6 +79,19 @@ def resolve_bunkr(session, url):
     return f"{media_url}?{urlencode({'token': data['token'], 'ex': data.get('ex', '')})}", page_url
 
 
+def content_length(response):
+    try:
+        return int(response.headers.get("Content-Length", 0))
+    except ValueError:
+        return 0
+
+
+def session_cookies(session):
+    """A snapshot of the cookies; plain iteration breaks when another thread's response adds one."""
+    with session.cookies._cookies_lock:
+        return list(session.cookies)
+
+
 def video_extension(header):
     """Check container signatures; an HTTP-200 error page is never a video."""
     if len(header) >= 12 and header[4:8] == b"ftyp":
@@ -99,10 +112,9 @@ def video_extension(header):
 
 
 class VideoDownloader:
-    def __init__(self, session, log=print, transfer=lambda *args: None):
+    def __init__(self, session, log=print):
         self.session = session
         self.log = log
-        self.transfer = transfer
 
     def resolve_turbo(self, url):
         identifier = turbo_id(url)
@@ -121,40 +133,25 @@ class VideoDownloader:
             raise ValueError("Turbo could not provide a video URL. The file may be unavailable or require verification.")
         return media_url, player_url
 
-    def save(self, url, referer, directory, cancelled=lambda: False, embedded=False):
+    def save(self, url, referer, directory, cancelled=lambda: False, embedded=False, transfer=lambda *args: None):
+        """Download into `directory` under a content-hash name. Returns (file, whether it is new)."""
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
-        identity = sha256(video_identity(url).encode()).hexdigest()
-        index_path = directory / ".simpdl-videos.json"
-        try:
-            index = json.loads(index_path.read_text(encoding="utf-8"))
-            if not isinstance(index, dict):
-                index = {}
-        except (FileNotFoundError, ValueError):
-            index = {}
-        previous = index.get(identity, {})
-        if isinstance(previous, dict):
-            filename = previous.get("file", "")
-            if filename and Path(filename).name == filename:
-                target = directory / filename
-                if target.is_file() and target.stat().st_size == previous.get("size"):
-                    return False
-        if cancelled():
-            raise InterruptedError("Download cancelled")
         if turbo_id(url):
-            self.log("Resolving Turbo video…")
             url, referer = self.resolve_turbo(url)
             embedded = False
         elif bunkr_route(url):
             url, referer = resolve_bunkr(self.session, url)
             embedded = False
+        if cancelled():
+            raise InterruptedError("Download cancelled")
         streaming = urlsplit(url).path.lower().endswith(STREAM_EXTENSIONS)
         with tempfile.TemporaryDirectory(prefix=".simpdl-video-", dir=directory) as working:
             working = Path(working)
             if embedded or streaming:
-                source = self._download_player(url, referer, working, cancelled)
+                source = self._download_player(url, referer, working, cancelled, transfer)
             else:
-                source = self._download_direct(url, referer, working, cancelled)
+                source = self._download_direct(url, referer, working, cancelled, transfer)
             if cancelled():
                 raise InterruptedError("Download cancelled")
             digest = sha256()
@@ -166,24 +163,17 @@ class VideoDownloader:
                         raise InterruptedError("Download cancelled")
                     digest.update(chunk)
             target = directory / (digest.hexdigest() + extension)
-            saved = not target.exists() or target.stat().st_size != source.stat().st_size
-            if saved:
+            new = not target.exists() or target.stat().st_size != source.stat().st_size
+            if new:
                 source.replace(target)
-            index[identity] = {"file": target.name, "size": target.stat().st_size}
-            temporary_index = working / "index.json"
-            temporary_index.write_text(json.dumps(index, indent=2), encoding="utf-8")
-            temporary_index.replace(index_path)
-        return saved
+        return target, new
 
-    def _download_direct(self, url, referer, working, cancelled):
+    def _download_direct(self, url, referer, working, cancelled, transfer):
         path = working / "video.part"
         headers = {"Referer": referer, "Accept-Encoding": "identity"}
         with self.session.get(url, headers=headers, stream=True, timeout=(15, 45)) as response:
             response.raise_for_status()
-            try:
-                total = int(response.headers.get("Content-Length", 0))
-            except ValueError:
-                total = 0
+            total = content_length(response)
             received = 0
             prefix = bytearray()
             with path.open("wb") as handle:
@@ -198,13 +188,13 @@ class VideoDownloader:
                             video_extension(prefix)
                     handle.write(chunk)
                     received += len(chunk)
-                    self.transfer(received, total)
+                    transfer(received, total)
             if total and received != total and not response.headers.get("Content-Encoding"):
                 raise ValueError("Video download was incomplete; retry this thread")
             video_extension(prefix)
         return path
 
-    def _download_player(self, url, referer, working, cancelled):
+    def _download_player(self, url, referer, working, cancelled, transfer):
         import yt_dlp
 
         owner = self
@@ -222,7 +212,7 @@ class VideoDownloader:
         def progress(info):
             if cancelled():
                 raise InterruptedError("Download cancelled")
-            self.transfer(info.get("downloaded_bytes", 0), info.get("total_bytes") or info.get("total_bytes_estimate") or 0)
+            transfer(info.get("downloaded_bytes", 0), info.get("total_bytes") or info.get("total_bytes_estimate") or 0)
 
         def reject_live(info, *, incomplete=False):
             if cancelled():
@@ -235,13 +225,13 @@ class VideoDownloader:
             "format": "bestvideo+bestaudio/best" if shutil.which("ffmpeg") else "best",
             "noplaylist": True, "playlist_items": "1", "quiet": True,
             "logger": Logger(), "progress_hooks": [progress], "match_filter": reject_live,
-            "socket_timeout": 30, "retries": 2, "fragment_retries": 2,
+            "socket_timeout": 30, "retries": 2, "fragment_retries": 2, "concurrent_fragment_downloads": 4,
             "http_headers": {"Referer": referer, "User-Agent": self.session.headers["User-Agent"]},
             "cachedir": False,
         }
         try:
             with yt_dlp.YoutubeDL(options) as downloader:
-                for cookie in self.session.cookies:
+                for cookie in session_cookies(self.session):
                     downloader.cookiejar.set_cookie(cookie)
                 downloader.extract_info(url, download=True)
         except Exception:

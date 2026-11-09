@@ -19,9 +19,10 @@ Paste thread links, choose a folder, and start downloading. The single-window in
 - Download direct videos and resolve Turbo player links.
 - Download every image and video in Bunkr albums and file links.
 - Handle supported external players and streams through [yt-dlp](https://github.com/yt-dlp/yt-dlp).
-- Download files in the order they appear in the thread (sort the folder by date modified to match).
-- Organize files into separate thread folders and skip completed downloads.
-- Stop a running download, skip a stuck file, and inspect failures in the log.
+- Download six files at once, with live speed and time left for each slow file.
+- Keep thread order: sort the folder by date modified to see files as they appear in the thread.
+- Organize files into separate thread folders; a rerun skips finished files without fetching them again.
+- Stop a running download, skip any single file, and inspect failures in the log.
 
 ## Requirements
 
@@ -89,7 +90,7 @@ On Linux, if Playwright reports missing browser libraries, run `python -m playwr
 4. Select **Browser login** or **Saved cookies**.
 5. Click **Start download**.
 
-Use **Stop** to cancel the run, or **Skip file** to abandon only the file that is downloading (for example a stuck or very slow video) and continue with the next one. Progress, counts and failed links appear in the activity panel on the right. Settings and thread links are saved when starting a download or closing the application.
+Files that take more than a moment get their own row with progress, speed and a **Skip** button, which abandons only that file (for example a stuck or very slow video). Use **Stop** to cancel the run. Progress, counts and failed links appear in the activity panel on the right. Settings and thread links are saved when starting a download or closing the application.
 
 ### Thread pages
 
@@ -103,7 +104,7 @@ Use **Page range…** to add specific pages. If explicit page URLs such as `page
 
 ### Authentication
 
-**Browser login** opens a browser window where you can sign in or complete verification. The app waits up to two minutes for the thread to become accessible. This browser session lasts for the current run.
+**Browser login** opens a browser window where you can sign in or complete verification. The app waits up to two minutes for the thread to become accessible. Once you are in, the window closes and the remaining pages are read in the background; it reopens only if the site refuses that. This browser session lasts for the current run.
 
 To reuse an existing browser session:
 
@@ -135,15 +136,17 @@ Images smaller than 256 × 256 pixels are skipped. Site navigation images and av
 - Each thread has its own folder.
 - Files use content-hash names and their actual extensions.
 - Videos stream to disk instead of being held in memory.
-- Partial video files are removed after cancellation or failure. Retrying starts that video again.
-- Completed videos are recorded in `.simpdl-videos.json` and skipped before downloading again. Turbo's different page routes share the same record.
-- Missing or size-changed video files are downloaded again. Image duplicates are checked after fetching their content.
+- Up to six files download at the same time; thread pages are still read one at a time.
+- Modified times are set in thread order when the run ends, so sorting by date matches the thread.
+- Partial files are removed after cancellation or failure, and leftovers from a killed run are cleaned up on the next one. Retrying starts that file again.
+- Finished images and videos are recorded in `.simpdl-videos.json` and skipped without being fetched again. Turbo's different page routes share the same record.
+- Files that were deleted from the folder are downloaded again. The same image posted under two links is still saved only once.
 
 Stopping may take until the current network request finishes or times out.
 
 ## Local files
 
-The application creates these files on first launch:
+The application keeps its settings in these files, created as they are needed:
 
 ```text
 config/config.json          Download folder and preferences

@@ -117,13 +117,14 @@ class InterfaceTests(unittest.TestCase):
         client.save_video.side_effect = save
         with patch("app_ui.ThreadClient", return_value=client):
             self.app.start()
-            self.assertEqual(self.app.skip_button.cget("state"), "normal")
-            self.pump_until(lambda: client.save_video.called)
-            self.app.skip()
+            # A file gets a row with its own Skip button once it has been downloading for a moment.
+            self.pump_until(lambda: self.app.rows[0]["task"] is not None)
+            self.assertEqual(self.app.rows[0]["name"].cget("text"), "Video · simpcity.cr")
+            self.app.rows[0]["skip"].invoke()
             self.pump_until(lambda: not self.app.running)
         self.assertEqual(self.app.status.get(), "Finished")
         self.assertIn("1 videos saved · 1 skipped · 0 errors", self.app.summary.get())
-        self.assertEqual(self.app.skip_button.cget("state"), "disabled")
+        self.assertIsNone(self.app.rows[0]["task"])
 
     def test_browser_login_does_not_require_valid_cookie_file(self):
         self.app.cookie_path.write_text("invalid json")

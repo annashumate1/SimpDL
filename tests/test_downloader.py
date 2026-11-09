@@ -5,6 +5,7 @@ from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import tempfile
 import threading
+import time
 import unittest
 from unittest.mock import Mock, patch
 
@@ -27,6 +28,7 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(generate_links(URL + "page-9?foo=bar#post-10", 2), [URL, URL + "page-2"])
         self.assertEqual(thread_url(URL + "?page=3#post-4"), URL + "page-3")
         self.assertEqual(thread_url(URL + "unread"), URL)
+        self.assertEqual(thread_url(URL + "post-4567"), URL)
 
     def test_query_routes(self):
         url = "https://simpcity.cr/index.php?threads/example.123/page-3&_xfRequestUri=x"
@@ -102,6 +104,7 @@ class DownloadTests(unittest.TestCase):
         response = Mock()
         response.__enter__ = Mock(return_value=response)
         response.__exit__ = Mock(return_value=False)
+        response.headers = {}
         response.iter_content.return_value = [content]
         return response
 
@@ -117,8 +120,39 @@ class DownloadTests(unittest.TestCase):
                 self.assertEqual(get.call_count, 1)
                 self.assertEqual(next(Path(directory).iterdir()).suffix, ".png")
             with patch.object(client.session, "get", return_value=self.make_response(self.image_bytes())):
-                self.assertFalse(client.save_image("https://cdn.example/file", URL, directory))
+                self.assertFalse(client.save_image("https://cdn.example/other-url", URL, directory))
             self.assertEqual(len(list(Path(directory).iterdir())), 1)
+
+    def test_rerun_skips_known_and_tiny_images_without_fetching(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with ThreadClient({}) as client, patch.object(client.session, "get", side_effect=[
+                    self.make_response(self.image_bytes()), self.make_response(self.image_bytes((10, 10)))]):
+                self.assertTrue(client.save_image("https://cdn.example/big", URL, directory))
+                self.assertFalse(client.save_image("https://cdn.example/tiny", URL, directory))
+            with ThreadClient({}) as client, patch.object(client.session, "get") as get:
+                self.assertFalse(client.save_image("https://cdn.example/big", URL, directory))
+                self.assertFalse(client.save_image("https://cdn.example/tiny", URL, directory))
+                get.assert_not_called()
+                next(Path(directory).glob("*.png")).unlink()  # A deleted file is fetched again.
+                get.return_value = self.make_response(self.image_bytes())
+                self.assertTrue(client.save_image("https://cdn.example/big", URL, directory))
+
+    def test_parallel_downloads_keep_thread_order_in_modified_times(self):
+        client = Mock()
+        client.fetch_page.return_value = (post("".join(f'<img src="https://cdn.example/{n}.png">' for n in range(8))), URL)
+        with tempfile.TemporaryDirectory() as directory:
+            def save(url, referer, folder, cancelled, **kwargs):
+                number = int(url.rsplit("/", 1)[1][0])
+                time.sleep((8 - number) * 0.01)  # The first file of the thread finishes last.
+                path = Path(folder) / f"{7 - number}.png"  # Names sort the opposite way too.
+                path.write_bytes(b"x")
+                return path
+
+            client.save_image.side_effect = save
+            result = download_threads(client, [URL], directory, log=lambda _: None, workers=8)
+            self.assertEqual((result.saved, result.found, result.done), (8, 8, 8))
+            by_time = sorted(Path(directory).glob("example.123/*.png"), key=lambda path: path.stat().st_mtime_ns)
+            self.assertEqual([path.name for path in by_time], [f"{7 - n}.png" for n in range(8)])
 
     def test_real_http_image_download_through_thread_runner(self):
         content = self.image_bytes()
@@ -179,6 +213,28 @@ class DownloadTests(unittest.TestCase):
             with patch.object(client.session, "get", return_value=response), patch.object(client, "_browser_page", return_value=(post("ok"), URL + "page-12")) as browser:
                 client.fetch_page(URL + "page-12")
                 browser.assert_called_once()
+
+    def test_browser_login_reads_later_pages_in_the_background(self):
+        with ThreadClient({}, log=lambda _: None, browser_mode=True) as client:
+            response = self.make_response(b"")
+            response.text, response.url, response.status_code = post("ok"), URL + "page-2", 200
+            window = client.browser = Mock()
+            with patch.object(client.session, "get", return_value=response) as get, \
+                    patch.object(client, "_browser_page", return_value=(post("ok"), URL)) as browser:
+                client.fetch_page(URL)  # Signing in needs the window...
+                get.assert_not_called()
+                client.fetch_page(URL + "page-2")  # ...the rest does not.
+                browser.assert_called_once()
+            window.close.assert_called_once()
+            self.assertIsNone(client.browser)
+            # If the site refuses plain HTTP after all, the browser takes over for good.
+            client.http_works = True
+            response.status_code, response.text = 403, "Forbidden"
+            with patch.object(client.session, "get", return_value=response) as get, \
+                    patch.object(client, "_browser_page", return_value=(post("ok"), URL)) as browser:
+                client.fetch_page(URL + "page-3")
+                client.fetch_page(URL + "page-4")
+                self.assertEqual((get.call_count, browser.call_count), (1, 2))
 
     def test_auto_pagination_and_loop_detection(self):
         client = Mock()

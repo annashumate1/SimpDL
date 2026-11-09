@@ -2,6 +2,7 @@
 
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from urllib.parse import parse_qsl, urljoin, urlsplit, urlunsplit
 
 from bs4 import BeautifulSoup
@@ -46,7 +47,7 @@ def thread_url(url, page=None):
         raise ValueError("Enter a thread URL on https://simpcity.cr")
     query_route = parts.path.rstrip("/") == "/index.php"
     route = parts.query.split("&", 1)[0] if query_route else parts.path.lstrip("/")
-    match = re.fullmatch(r"threads/([^/]+\.[0-9]+|[0-9]+)(?:/(?:page-([0-9]+)|unread|latest))?/?", route)
+    match = re.fullmatch(r"threads/([^/]+\.[0-9]+|[0-9]+)(?:/(?:page-([0-9]+)|unread|latest|post-[0-9]+))?/?", route)
     if not match:
         raise ValueError("Expected a thread URL: https://simpcity.cr/threads/name.123/")
     tail = parts.query.split("&", 1)[1] if query_route and "&" in parts.query else ""
@@ -226,17 +227,20 @@ def next_page(soup, current_url):
     return None
 
 
-def parse_page(html, url, status=200):
+@lru_cache(maxsize=2)  # fetch_page validates a page and download_threads then reads it: parse it once.
+def _parse(html, url, status):
     soup = BeautifulSoup(html, "html.parser")
     error = page_error(soup, url, status)
     if error:
         raise ValueError(error)
-    return extract_images(soup, url), next_page(soup, url)
+    return tuple(extract_media(soup, url)), next_page(soup, url)
 
 
 def parse_media_page(html, url, status=200):
-    soup = BeautifulSoup(html, "html.parser")
-    error = page_error(soup, url, status)
-    if error:
-        raise ValueError(error)
-    return extract_media(soup, url), next_page(soup, url)
+    media, following = _parse(html, url, status)
+    return list(media), following
+
+
+def parse_page(html, url, status=200):
+    media, following = _parse(html, url, status)
+    return [item.url for item in media if item.kind == "image"], following

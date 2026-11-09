@@ -1,5 +1,6 @@
 """A single-window interface for the thread downloader."""
 
+from collections import deque
 from pathlib import Path
 import os
 import queue
@@ -13,7 +14,7 @@ import customtkinter as ctk
 from PIL import Image, ImageDraw, ImageOps
 
 from config_utils import read_json, update_config, write_json
-from download_engine import ThreadClient, download_threads
+from download_engine import WORKERS, ThreadClient, download_threads
 from site_utils import parse_cookies, thread_url
 
 # (light, dark) pairs; CustomTkinter switches them with the appearance mode.
@@ -44,7 +45,7 @@ def configure_style(window, appearance="System"):
 def size_text(size):
     for unit in ("B", "KB", "MB", "GB", "TB"):
         if size < 1024 or unit == "TB":
-            return f"{size:.1f} {unit}" if unit != "B" else f"{size} B"
+            return f"{size:.1f} {unit}" if unit != "B" else f"{size:.0f} B"
         size /= 1024
 
 
@@ -99,9 +100,11 @@ class DownloadApp(ctk.CTkFrame):
         self.cookie_path = self.config_path.parent / "manual_cookies.json"
         self.events = queue.Queue()
         self.stop_event = threading.Event()
-        self.skip_event = threading.Event()
+        self.skipped = set()  # Numbers of the files the user chose to skip; the engine reads it.
+        self.active = {}  # File number -> its transfer state while it downloads.
+        self.received = 0
+        self.samples = deque()  # (time, total bytes received) over the last few seconds, for the speed readout.
         self.running = self.closing = False
-        self.messages = []
         self.editable = []
         config = read_json(self.config_path)
         try:
@@ -119,7 +122,6 @@ class DownloadApp(ctk.CTkFrame):
         self.status = tk.StringVar(value="Ready")
         self.summary = tk.StringVar(value="Add a thread link, then press Start download.")
         self.transfer_text = tk.StringVar()
-        self.transfer_started = None  # (monotonic time, bytes) of the current file's first update
         self.counts = {name: tk.StringVar(value="0") for name in ("Pages", "Images", "Videos", "Errors")}
         self._load_logo()
         self._build()
@@ -254,7 +256,7 @@ class DownloadApp(ctk.CTkFrame):
     def _build_activity(self, master):
         box = card(master)
         box.grid_columnconfigure(0, weight=1)
-        box.grid_rowconfigure(4, weight=1)
+        box.grid_rowconfigure(5, weight=1)
         self.status_label = label(box, textvariable=self.status, size=17, weight="bold")
         self.status_label.grid(row=0, column=0, sticky="ew", padx=20, pady=(18, 2))
         self.summary_label = label(box, textvariable=self.summary, size=12, color=MUTED, wraplength=360)
@@ -277,22 +279,44 @@ class DownloadApp(ctk.CTkFrame):
             label(tile, textvariable=value, size=20, weight="bold", color=DANGER if name == "Errors" else TEXT).pack(anchor="w", padx=12, pady=(8, 0))
             label(tile, name, 11, color=MUTED).pack(anchor="w", padx=12, pady=(0, 8))
 
+        # One row per download worker, built once and shown only while a file is taking a while.
+        self.rows_frame = ctk.CTkFrame(box, fg_color="transparent")
+        self.rows_frame.grid(row=4, column=0, sticky="ew", padx=20)
+        self.rows_frame.grid_columnconfigure(0, weight=1)
+        self.rows_frame.grid_remove()
+        self.rows = [self._build_row(self.rows_frame, slot) for slot in range(WORKERS)]
+
         self.log_text = ctk.CTkTextbox(box, wrap="word", font=ctk.CTkFont(family="monospace", size=11), corner_radius=10,
                                        fg_color=FIELD, text_color=MUTED, border_width=0, height=120)
-        self.log_text.grid(row=4, column=0, sticky="nsew", padx=20)
+        self.log_text.grid(row=5, column=0, sticky="nsew", padx=20)
         self.log_text.insert("end", "Download activity will appear here.\n")
         self.log_text.configure(state="disabled")
+        self.log_placeholder = True
 
         actions = ctk.CTkFrame(box, fg_color="transparent")
-        actions.grid(row=5, column=0, sticky="ew", padx=20, pady=(14, 20))
-        actions.grid_columnconfigure(2, weight=1)
+        actions.grid(row=6, column=0, sticky="ew", padx=20, pady=(14, 20))
+        actions.grid_columnconfigure(1, weight=1)
         self.stop_button = button(actions, "Stop", self.stop, state="disabled", width=80, height=44)
         self.stop_button.grid(row=0, column=0, sticky="w")
-        self.skip_button = button(actions, "Skip file", self.skip, state="disabled", width=96, height=44)
-        self.skip_button.grid(row=0, column=1, sticky="w", padx=(10, 0))
         self.start_button = button(actions, "Start download", self.start, primary=True, height=44, font=font(15, "bold"))
-        self.start_button.grid(row=0, column=2, sticky="ew", padx=(10, 0))
+        self.start_button.grid(row=0, column=1, sticky="ew", padx=(10, 0))
         return box
+
+    def _build_row(self, master, slot):
+        frame = ctk.CTkFrame(master, fg_color=FIELD, corner_radius=10)
+        frame.grid(row=slot, column=0, sticky="ew", pady=(0, 4))
+        frame.grid_columnconfigure(1, weight=1)
+        frame.grid_remove()
+        name = label(frame, "", 12)
+        name.grid(row=0, column=0, sticky="w", padx=(12, 8), pady=(3, 0))
+        detail = label(frame, "", 11, color=MUTED)
+        detail.configure(anchor="e")
+        detail.grid(row=0, column=1, sticky="e", pady=(3, 0))
+        bar = ctk.CTkProgressBar(frame, height=4, corner_radius=2, progress_color=ACCENT, fg_color=SUBTLE)
+        bar.grid(row=1, column=0, columnspan=2, sticky="ew", padx=(12, 0), pady=(0, 6))
+        skip = button(frame, "Skip", lambda: self.skip(slot), width=52, height=24, font=font(12), fg_color=CARD)
+        skip.grid(row=0, column=2, rowspan=2, padx=10)
+        return {"frame": frame, "name": name, "detail": detail, "bar": bar, "skip": skip, "task": None}
 
     def _set_appearance(self, value):
         ctk.set_appearance_mode(value)
@@ -302,7 +326,7 @@ class DownloadApp(ctk.CTkFrame):
             self._append_log(f"Could not save settings: {error}")
 
     def _access_hint(self):
-        self.access_note.configure(text="A browser window opens so you can sign in." if self.access.get() == "Browser login"
+        self.access_note.configure(text="A browser window opens so you can sign in, then closes." if self.access.get() == "Browser login"
                                    else "Uses the cookies you saved with the Cookies… button.")
 
     def _url_lines(self):
@@ -489,136 +513,183 @@ class DownloadApp(ctk.CTkFrame):
             self._error(str(error))
             return
         self.stop_event.clear()
-        self.skip_event.clear()
+        self.skipped = set()
+        self.received = 0
+        self.samples.clear()
         self._set_running(True)
         self._set_status("Starting download…")
-        self.summary.set("Preparing your threads.")
+        self.summary.set("Sign in using the browser window if it asks." if browser else "Opening the thread…")
         self.transfer_text.set("")
         self.progress.set(0)
         for value in self.counts.values():
             value.set("0")
         self._append_log("Starting download")
-        threading.Thread(target=self._run, args=(self.events, self.stop_event, self.skip_event, urls, output, cookies, browser, self.follow.get(), MEDIA_CHOICES[self.media.get()]), daemon=True).start()
+        threading.Thread(target=self._run, args=(self.events, self.stop_event, self.skipped, urls, output, cookies, browser, self.follow.get(), MEDIA_CHOICES[self.media.get()]), daemon=True).start()
 
     def _set_running(self, running):
         self.running = running
         state = "disabled" if running else "normal"
         self.start_button.configure(state=state, text="Downloading…" if running else "Start download")
         self.stop_button.configure(state="normal" if running else "disabled")
-        self.skip_button.configure(state="normal" if running else "disabled")
         self.urls.configure(state=state)
         for widget in self.editable + [self.media_menu, self.access_menu]:
             widget.configure(state=state)
 
     @staticmethod
-    def _run(events, stop_event, skip_event, urls, output, cookies, browser, follow, media_types):
-        last_update = 0
+    def _run(events, stop_event, skipped, urls, output, cookies, browser, follow, media_types):
+        sent = {}
 
-        def transfer(done, total):
-            nonlocal last_update
+        def transfer(task, label, done, total):
+            # Called for every chunk on every download thread; the interface needs about ten updates a second per file.
             now = time.monotonic()
-            if now - last_update >= 0.15 or done == total:
-                last_update = now
-                events.put(("transfer", (done, total)))
+            if done is None:
+                sent.pop(task, None)
+            elif done != total and now - sent.get(task, 0) < 0.1:
+                return
+            else:
+                sent[task] = now
+            events.put(("transfer", (task, label, done, total)))
 
+        log = lambda message: events.put(("log", message))
         try:
-            with ThreadClient(cookies, log=lambda message: events.put(("log", message)), browser_mode=browser, transfer=transfer) as client:
-                result = download_threads(client, urls, output, log=lambda message: events.put(("log", message)),
-                                          progress=lambda *values: events.put(("progress", values)),
-                                          cancelled=stop_event.is_set, follow_pagination=follow, media_types=media_types, skip=skip_event)
+            with ThreadClient(cookies, log=log, browser_mode=browser) as client:
+                result = download_threads(client, urls, output, log=log, progress=lambda result: events.put(("progress", result)),
+                                          cancelled=stop_event.is_set, follow_pagination=follow, media_types=media_types,
+                                          skip=skipped, transfer=transfer)
             events.put(("done", result))
         except Exception as error:
             events.put(("failed", str(error)))
 
-    def skip(self):
-        """Abandon only the file in progress; the run continues with the next one."""
-        if self.running and not self.stop_event.is_set():
-            self.skip_event.set()
-            self._set_status("Skipping current file…")
-            self.transfer_text.set("")
+    def skip(self, slot):
+        """Abandon only the file shown in this row; the run continues with the others."""
+        task = self.rows[slot]["task"]
+        if task is not None:
+            self.skipped.add(task)
+            self.rows[slot]["detail"].configure(text="Skipping…")
+            self.rows[slot]["skip"].configure(state="disabled")
 
     def stop(self):
         self.stop_event.set()
         self.stop_button.configure(state="disabled")
-        self.skip_button.configure(state="disabled")
         self._set_status("Stopping…")
-        self.summary.set("Waiting for the current network request to finish.")
-
-    def _bump(self, name):
-        self.counts[name].set(str(int(self.counts[name].get()) + 1))
+        self.summary.set("Waiting for the current network requests to finish.")
 
     def _poll(self):
         try:
             self._drain_events()
+            if self.running:
+                self._show_transfers()
         except tk.TclError:
             return  # The window is being destroyed.
         if not self.closing or self.running:
             self._poll_id = self.after(80, self._poll)
 
     def _drain_events(self):
-        for _ in range(200):
+        lines = []
+        result = None
+        for _ in range(500):
             try:
                 kind, payload = self.events.get_nowait()
             except queue.Empty:
                 break
             if kind == "log":
-                self._append_log(payload)
-                if payload.startswith("Saved image"):
-                    self._bump("Images")
-                elif payload.startswith("Saved video"):
-                    self._bump("Videos")
-                elif " failed" in payload:
-                    self._bump("Errors")
-                if not self.stop_event.is_set() and payload.startswith(("Reading ", "Downloading ", "Resolving ", "Browser opened", "Bunkr link has")):
-                    self._set_status("Opening thread…" if payload.startswith("Reading ") else "Sign in using the browser window." if payload.startswith("Browser opened") else payload.split(":")[0])
-                    self.transfer_text.set("")
+                lines.append(payload)
             elif kind == "progress":
-                page, index, total, saved = payload
-                self.counts["Pages"].set(str(page))
-                self.progress.set(index / max(1, total))
-                self.summary.set(f"Page {page} · {index} of {total} files checked · {saved} saved")
-                self.transfer_text.set("")
+                result = payload
             elif kind == "transfer":
-                done, total = payload
-                now = time.monotonic()
-                if self.transfer_started is None or done < self.transfer_started[1]:
-                    self.transfer_started = (now, done)  # A new file started.
-                started, base = self.transfer_started
-                elapsed = now - started
-                self.transfer_text.set(transfer_label(done, total, (done - base) / elapsed if elapsed >= 0.5 else 0))
-                if total:
-                    self.progress.set(done / total)
+                task, name, done, total = payload
+                if done is None:
+                    self.active.pop(task, None)
+                    continue
+                state = self.active.setdefault(task, {"name": name, "since": time.monotonic(), "done": 0, "first": None})
+                self.received += max(0, done - state["done"])  # yt-dlp restarts its count for a separate audio track.
+                if done and not state["first"]:
+                    state["first"] = (time.monotonic(), done)
+                state.update(done=done, total=total)
             elif kind in ("done", "failed"):
                 self._set_running(False)
+                self.active.clear()
+                self._show_transfers()
                 self.transfer_text.set("")
                 if kind == "failed":
                     self._set_status("Download failed", DANGER)
                     self.summary.set(payload)
-                    self._append_log(payload)
+                    lines.append(payload)
                 else:
+                    self._show_counts(payload)
                     status = "Stopped" if payload.cancelled else "Finished with errors" if payload.errors else "Finished" if payload.saved else "No new files"
                     self._set_status(status, SUCCESS if status == "Finished" else DANGER if payload.errors else TEXT)
                     self.summary.set(f"{payload.images} images and {payload.videos} videos saved · {payload.skipped} skipped · {payload.errors} errors")
-                    for name, value in (("Pages", payload.pages), ("Images", payload.images), ("Videos", payload.videos), ("Errors", payload.errors)):
-                        self.counts[name].set(str(value))
-                    self._append_log(f"{status}: {self.summary.get()}")
+                    lines.append(f"{status}: {self.summary.get()}")
                     if not payload.cancelled and not payload.errors:
                         self.progress.set(1)
+                result = None
                 if self.closing:
                     self.window.destroy()
                     return
+        if result:
+            self._show_counts(result)
+            self.summary.set(f"Page {result.pages} · {result.done:,} of {result.found:,} files · {result.skipped:,} skipped")
+            if not self.stop_event.is_set():
+                self._set_status("Downloading…")
+        if lines:
+            self._append_log("\n".join(lines))
+
+    def _show_counts(self, result):
+        for name, value in (("Pages", result.pages), ("Images", result.images), ("Videos", result.videos), ("Errors", result.errors)):
+            self.counts[name].set(str(value))
+        self.progress.set(result.done / max(1, result.found))
+
+    def _show_transfers(self):
+        """Give each file that has been downloading for a moment a row, and refresh the overall speed."""
+        now = time.monotonic()
+        for row in self.rows:
+            if row["task"] is not None and row["task"] not in self.active:
+                row["task"] = None
+                row["frame"].grid_remove()
+        shown = {row["task"] for row in self.rows}
+        for task, state in self.active.items():
+            # Most images are done within this delay; showing them would only make the rows flicker.
+            if task not in shown and now - state["since"] >= 0.6:
+                row = next((row for row in self.rows if row["task"] is None), None)
+                if row is None:
+                    break
+                row["task"] = task
+                row["name"].configure(text=state["name"])
+                row["skip"].configure(state="normal")
+                row["frame"].grid()
+        for row in self.rows:
+            state = self.active.get(row["task"])
+            if state and row["task"] not in self.skipped:
+                started, base = state["first"] or (now, 0)
+                elapsed = now - started
+                rate = (state["done"] - base) / elapsed if elapsed >= 0.5 else 0
+                row["detail"].configure(text=transfer_label(state["done"], state["total"], rate) if state["done"] else "Starting…")
+                row["bar"].set(state["done"] / state["total"] if state["total"] else 0)
+        if any(row["task"] is not None for row in self.rows):
+            self.rows_frame.grid()
+        else:
+            self.rows_frame.grid_remove()
+        if not self.samples or now - self.samples[-1][0] >= 0.5:
+            self.samples.append((now, self.received))
+            while now - self.samples[0][0] > 3:
+                self.samples.popleft()
+            earliest, received = self.samples[0]
+            rate = (self.received - received) / (now - earliest) if now > earliest else 0
+            self.transfer_text.set(f"{size_text(rate)}/s" if rate >= 1 else "")
 
     def _append_log(self, message):
-        first = not self.messages
-        self.messages.append(message)
-        del self.messages[:-LOG_LINES]
+        at_end = self.log_text.yview()[1] >= 0.999  # Only follow new lines if the user has not scrolled up to read.
         self.log_text.configure(state="normal")
-        if first:
+        if self.log_placeholder:
             self.log_text.delete("1.0", "end")  # Drop the "activity will appear here" placeholder.
+            self.log_placeholder = False
         self.log_text.insert("end", message + "\n")
-        if int(self.log_text.index("end-1c").split(".")[0]) > LOG_LINES:
-            self.log_text.delete("1.0", "2.0")
-        self.log_text.see("end")
+        extra = int(self.log_text.index("end-1c").split(".")[0]) - 1 - LOG_LINES
+        if extra > 0:
+            self.log_text.delete("1.0", f"{extra + 1}.0")
+        if at_end:
+            self.log_text.see("end")
         self.log_text.configure(state="disabled")
 
     def close(self):

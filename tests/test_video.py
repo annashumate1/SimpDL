@@ -117,13 +117,13 @@ class VideoParsingTests(unittest.TestCase):
         self.assertEqual((result.videos, result.errors), (1, 1))
 
     def test_skip_abandons_only_the_current_file(self):
-        skip = threading.Event()
+        skip = set()
         client = Mock()
         client.fetch_page.return_value = (post('<video src="/stuck.mp4"></video><video src="/next.mp4"></video>'), URL)
 
         def save(url, referer, directory, cancelled, **kwargs):
             if url.endswith("stuck.mp4"):
-                skip.set()  # As if the user pressed Skip while this file hangs.
+                skip.add(1)  # As if the user pressed Skip on the first file while it hangs.
                 while not cancelled():
                     time.sleep(0.01)
                 raise InterruptedError("Download cancelled")
